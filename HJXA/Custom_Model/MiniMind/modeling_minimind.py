@@ -82,6 +82,10 @@ class MiniMindConfig(PretrainedConfig):
 #                                             MiniMind Model
 # 📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘
 
+
+
+# 可能不支持tp等操作
+
 import math 
 import torch
 import torch.nn.init as init
@@ -450,6 +454,8 @@ class MiniMindModel(nn.Module):
                 use_cache: bool = False,
                 **kwargs):
         batch_size, seq_length = input_ids.shape
+
+        # ======推理相关
         if hasattr(past_key_values, 'layers'): past_key_values = None
         past_key_values = past_key_values or [None] * len(self.layers)
         start_pos = past_key_values[0][0].shape[1] if past_key_values[0] is not None else 0
@@ -485,8 +491,8 @@ class MiniMindForCausalLM(PreTrainedModel, GenerationMixin):
         self.config = config or MiniMindConfig()
         super().__init__(self.config)
         self.model = MiniMindModel(self.config)
-        self.lm_head = nn.Linear(self.config.hidden_size, self.config.vocab_size, bias=False)
-        self.model.embed_tokens.weight = self.lm_head.weight
+        self.lm_head = nn.Linear(self.config.hidden_size, self.config.vocab_size, bias=False) # lm_head.weight.shape == (vocab_size, hidden_size)
+        self.model.embed_tokens.weight = self.lm_head.weight # hidden = embedding[input_ids] & logits = hidden @ weight.T 因为有转置所以二者可以相同, 共享权重，但也可以不共享
 
     def forward(self,
                 input_ids: Optional[torch.Tensor] = None,
