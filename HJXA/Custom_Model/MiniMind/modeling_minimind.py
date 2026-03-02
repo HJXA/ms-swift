@@ -37,6 +37,7 @@ class MiniMindConfig(PretrainedConfig):
             aux_loss_alpha: float = 0.01,
             seq_aux: bool = True,
             norm_topk_prob: bool = True,
+            tie_word_embeddings: bool = True,
             **kwargs
     ):
         super().__init__(**kwargs)
@@ -64,6 +65,8 @@ class MiniMindConfig(PretrainedConfig):
             "type": "yarn"
         } if self.inference_rope_scaling else None
         self.flash_attn = flash_attn
+        # 共享Embedding
+        self.tie_word_embeddings = tie_word_embeddings
         ####################################################
         # Here are the specific configurations of MOE
         # When use_moe is false, the following is invalid
@@ -486,6 +489,7 @@ class MiniMindModel(nn.Module):
 
 class MiniMindForCausalLM(PreTrainedModel, GenerationMixin):
     config_class = MiniMindConfig
+    _tied_weights_keys = {"lm_head.weight":"model.embed_tokens.weight"} # 声明共享的权重
 
     def __init__(self, config: MiniMindConfig = None):
         self.config = config or MiniMindConfig()
@@ -493,6 +497,8 @@ class MiniMindForCausalLM(PreTrainedModel, GenerationMixin):
         self.model = MiniMindModel(self.config)
         self.lm_head = nn.Linear(self.config.hidden_size, self.config.vocab_size, bias=False) # lm_head.weight.shape == (vocab_size, hidden_size)
         self.model.embed_tokens.weight = self.lm_head.weight # hidden = embedding[input_ids] & logits = hidden @ weight.T 因为有转置所以二者可以相同, 共享权重，但也可以不共享
+        
+
 
     def forward(self,
                 input_ids: Optional[torch.Tensor] = None,
