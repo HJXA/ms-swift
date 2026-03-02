@@ -30,13 +30,13 @@ from transformers.models.llama.modeling_llama import (
     eager_attention_forward,
 )
 from transformers.models.mistral.modeling_mistral import MistralModel
-from .configuration_qwen2 import Qwen2Config
+from .configuration_hjxa_qwen2 import HJXA_Qwen2Config
 
 
 logger = logging.get_logger(__name__)
 
 
-class Qwen2MLP(LlamaMLP):
+class HJXA_Qwen2MLP(LlamaMLP):
     def __init__(self, config):
         super().__init__(config)
         self.gate_proj = nn.Linear(self.hidden_size, self.intermediate_size, bias=False) # 与llama差别是bias一定为False, Llama则和config相关
@@ -44,8 +44,8 @@ class Qwen2MLP(LlamaMLP):
         self.down_proj = nn.Linear(self.intermediate_size, self.hidden_size, bias=False)
 
 
-class Qwen2Attention(LlamaAttention):
-    def __init__(self, config: Qwen2Config, layer_idx: int):
+class HJXA_Qwen2Attention(LlamaAttention):
+    def __init__(self, config: HJXA_Qwen2Config, layer_idx: int):
         super().__init__(config, layer_idx)
         self.q_proj = nn.Linear(config.hidden_size, config.num_attention_heads * self.head_dim, bias=False) # Qwen2本身有Q,K,V的bias, 但我选择去掉
         self.k_proj = nn.Linear(config.hidden_size, config.num_key_value_heads * self.head_dim, bias=False)
@@ -103,17 +103,17 @@ class Qwen2Attention(LlamaAttention):
 
 if version.parse(get_torch_version()) >= version.parse("2.3.0"):
 
-    class Qwen2RMSNorm(nn.RMSNorm):
+    class HJXA_Qwen2RMSNorm(nn.RMSNorm):
         def __init__(self, hidden_size, eps: float = 1e-6) -> None:
             super().__init__(normalized_shape=hidden_size, eps=eps, elementwise_affine=True)
 
 else:
 
     @use_kernel_forward_from_hub("RMSNorm")
-    class Qwen2RMSNorm(nn.Module):
+    class HJXA_Qwen2RMSNorm(nn.Module):
         def __init__(self, hidden_size, eps: float = 1e-6) -> None:
             """
-            Qwen2RMSNorm is equivalent to T5LayerNorm
+            HJXA_Qwen2RMSNorm is equivalent to T5LayerNorm
             """
             super().__init__()
             self.weight = nn.Parameter(torch.ones(hidden_size))
@@ -130,7 +130,7 @@ else:
             return f"{tuple(self.weight.shape)}, eps={self.variance_epsilon}"
 
 
-class Qwen2DecoderLayer(LlamaDecoderLayer): 
+class HJXA_Qwen2DecoderLayer(LlamaDecoderLayer): 
     # 现在为Pre-Norm
     # 在这里改Pre-Norm / Post-Norm / Pre-Post-Norm (Llama默认Pre-Norm)
     # Pre-Norm: norm -> attention -> norm -> mlp : x = x + Sublayer(Norm(x))
@@ -138,17 +138,17 @@ class Qwen2DecoderLayer(LlamaDecoderLayer):
     # Pre-Post-Norm: norm -> attention -> norm -> mlp -> norm : x = x + Norm(Sublayer(Norm(x))) -- Sandwich Norm
     # 要特别注意两者的残差相加的位置
 
-    def __init__(self, config: Qwen2Config, layer_idx: int):
+    def __init__(self, config: HJXA_Qwen2Config, layer_idx: int):
         super().__init__(config=config, layer_idx=layer_idx)
         self.attention_type = config.layer_types[layer_idx]
 
 
-class Qwen2PreTrainedModel(LlamaPreTrainedModel):
+class HJXA_Qwen2PreTrainedModel(LlamaPreTrainedModel):
     pass
 
 
-class Qwen2Model(MistralModel):
-    def __init__(self, config: Qwen2Config):
+class HJXA_Qwen2Model(MistralModel):
+    def __init__(self, config: HJXA_Qwen2Config):
         super().__init__(config)
         self.has_sliding_layers = "sliding_attention" in self.config.layer_types
 
@@ -226,28 +226,28 @@ class Qwen2Model(MistralModel):
         )
 
 
-class Qwen2ForCausalLM(LlamaForCausalLM):
+class HJXA_Qwen2ForCausalLM(LlamaForCausalLM):
     pass
 
 
-class Qwen2ForSequenceClassification(LlamaForSequenceClassification):
+class HJXA_Qwen2ForSequenceClassification(LlamaForSequenceClassification):
     pass
 
 
-class Qwen2ForTokenClassification(LlamaForTokenClassification):
+class HJXA_Qwen2ForTokenClassification(LlamaForTokenClassification):
     pass
 
 
-class Qwen2ForQuestionAnswering(LlamaForQuestionAnswering):
+class HJXA_Qwen2ForQuestionAnswering(LlamaForQuestionAnswering):
     pass
 
 
 __all__ = [
-    "Qwen2PreTrainedModel",
-    "Qwen2Model",
-    "Qwen2ForCausalLM",
-    "Qwen2RMSNorm",
-    "Qwen2ForSequenceClassification",
-    "Qwen2ForTokenClassification",
-    "Qwen2ForQuestionAnswering",
+    "HJXA_Qwen2PreTrainedModel",
+    "HJXA_Qwen2Model",
+    "HJXA_Qwen2ForCausalLM",
+    "HJXA_Qwen2RMSNorm",
+    "HJXA_Qwen2ForSequenceClassification",
+    "HJXA_Qwen2ForTokenClassification",
+    "HJXA_Qwen2ForQuestionAnswering",
 ]

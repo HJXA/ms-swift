@@ -12,7 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Qwen2 model configuration"""
+"""HJXA_Qwen2 model configuration"""
 
 from transformers.configuration_utils import PretrainedConfig, layer_type_validation
 from transformers.modeling_rope_utils import rope_config_validation
@@ -22,10 +22,10 @@ from transformers.utils import logging
 logger = logging.get_logger(__name__)
 
 
-class Qwen2Config(PretrainedConfig):
+class HJXA_Qwen2Config(PretrainedConfig):
     r"""
-    This is the configuration class to store the configuration of a [`Qwen2Model`]. It is used to instantiate a
-    Qwen2 model according to the specified arguments, defining the model architecture. Instantiating a configuration
+    This is the configuration class to store the configuration of a [`HJXA_Qwen2Model`]. It is used to instantiate a
+    HJXA_Qwen2 model according to the specified arguments, defining the model architecture. Instantiating a configuration
     with the defaults will yield a similar configuration to that of
     Qwen2-7B-beta [Qwen/Qwen2-7B-beta](https://huggingface.co/Qwen/Qwen2-7B-beta).
 
@@ -35,8 +35,8 @@ class Qwen2Config(PretrainedConfig):
 
     Args:
         vocab_size (`int`, *optional*, defaults to 151936):
-            Vocabulary size of the Qwen2 model. Defines the number of different tokens that can be represented by the
-            `inputs_ids` passed when calling [`Qwen2Model`]
+            Vocabulary size of the HJXA_Qwen2 model. Defines the number of different tokens that can be represented by the
+            `inputs_ids` passed when calling [`HJXA_Qwen2Model`]
         hidden_size (`int`, *optional*, defaults to 4096):
             Dimension of the hidden representations.
         intermediate_size (`int`, *optional*, defaults to 22016):
@@ -117,22 +117,22 @@ class Qwen2Config(PretrainedConfig):
             The dropout ratio for the attention probabilities.
 
     ```python
-    >>> from transformers import Qwen2Model, Qwen2Config
+    >>> from transformers import HJXA_Qwen2Model, HJXA_Qwen2Config
 
-    >>> # Initializing a Qwen2 style configuration
-    >>> configuration = Qwen2Config()
+    >>> # Initializing a HJXA_Qwen2 style configuration
+    >>> configuration = HJXA_Qwen2Config()
 
-    >>> # Initializing a model from the Qwen2-7B style configuration
-    >>> model = Qwen2Model(configuration)
+    >>> # Initializing a model from the HJXA_Qwen2-7B style configuration
+    >>> model = HJXA_Qwen2Model(configuration)
 
     >>> # Accessing the model configuration
     >>> configuration = model.config
     ```"""
 
-    model_type = "qwen2"
+    model_type = "hjxa_qwen2"
     keys_to_ignore_at_inference = ["past_key_values"]
 
-    # Default tensor parallel plan for base model `Qwen2`
+    # Default tensor parallel plan for base model `HJXA_Qwen2`
     base_model_tp_plan = {
         "layers.*.self_attn.q_proj": "colwise",
         "layers.*.self_attn.k_proj": "colwise",
@@ -215,4 +215,4 @@ class Qwen2Config(PretrainedConfig):
         )
 
 
-__all__ = ["Qwen2Config"]
+__all__ = ["HJXA_Qwen2Config"]
