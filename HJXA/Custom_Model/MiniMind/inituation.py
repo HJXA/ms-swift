@@ -9,11 +9,11 @@ sys.path.append("ms-swift/HJXA/Custom_Model/MiniMind")
 from modeling_minimind import MiniMindForCausalLM, MiniMindConfig
 
 
-SAVE_ROOT = "./hjxa_models"
+SAVE_ROOT = "./checkpoints/coe_pt_init_models"
 os.makedirs(SAVE_ROOT, exist_ok=True)
 
 # tokenizer 只加载一次
-tokenizer = AutoTokenizer.from_pretrained("checkpoints/MiniMind2-Small")
+tokenizer = AutoTokenizer.from_pretrained("checkpoints/MiniMind2")
 
 
 def count_parameters_detail(model):
@@ -100,6 +100,9 @@ def build_save_one(name, cfg):
 
     save_path = os.path.join(SAVE_ROOT, f"HJXA_MiniMind_{name}")
     os.makedirs(save_path, exist_ok=True)
+
+    model.save_pretrained(save_path)
+    tokenizer.save_pretrained(save_path)
 
     print(f"Saved to: {save_path}")
 
