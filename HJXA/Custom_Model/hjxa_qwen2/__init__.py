@@ -18,10 +18,9 @@ from transformers.utils.import_utils import define_import_structure
 
 
 if TYPE_CHECKING:
-    from .configuration_qwen2 import *
+    from .configuration_hjxa_qwen2 import *
     from .modeling_hjxa_qwen2 import *
-    from .tokenization_qwen2 import *
-    from .tokenization_qwen2_fast import *
+
 else:
     import sys
 
