@@ -15,7 +15,7 @@ from transformers.modeling_utils import ALL_ATTENTION_FUNCTIONS
 from transformers.processing_utils import Unpack
 from transformers.utils import TransformersKwargs, auto_docstring, logging
 from transformers.utils.deprecation import deprecate_kwarg
-from transformers.utils.generic import check_model_inputs
+# from transformers.utils.generic import check_model_inputs # 每个transformer版本不同会有区别
 from transformers.utils.import_utils import get_torch_version
 from transformers.models.llama.modeling_llama import (
     LlamaAttention,
@@ -30,7 +30,7 @@ from transformers.models.llama.modeling_llama import (
     eager_attention_forward,
 )
 from transformers.models.mistral.modeling_mistral import MistralModel
-from .configuration_hjxa_qwen2 import HJXA_Qwen2Config
+from configuration_hjxa_qwen2 import HJXA_Qwen2Config
 
 
 logger = logging.get_logger(__name__)
@@ -39,18 +39,18 @@ logger = logging.get_logger(__name__)
 class HJXA_Qwen2MLP(LlamaMLP):
     def __init__(self, config):
         super().__init__(config)
-        self.gate_proj = nn.Linear(self.hidden_size, self.intermediate_size, bias=False) # 与llama差别是bias一定为False, Llama则和config相关
-        self.up_proj = nn.Linear(self.hidden_size, self.intermediate_size, bias=False)
-        self.down_proj = nn.Linear(self.intermediate_size, self.hidden_size, bias=False)
+        self.gate_proj = nn.Linear(self.hidden_size, self.intermediate_size, bias=config.mlp_bias) # 与llama差别是bias一定为False, Llama则和config相关
+        self.up_proj = nn.Linear(self.hidden_size, self.intermediate_size, bias=config.mlp_bias)
+        self.down_proj = nn.Linear(self.intermediate_size, self.hidden_size, bias=config.mlp_bias)
 
 
 class HJXA_Qwen2Attention(LlamaAttention):
     def __init__(self, config: HJXA_Qwen2Config, layer_idx: int):
         super().__init__(config, layer_idx)
-        self.q_proj = nn.Linear(config.hidden_size, config.num_attention_heads * self.head_dim, bias=False) # Qwen2本身有Q,K,V的bias, 但我选择去掉
-        self.k_proj = nn.Linear(config.hidden_size, config.num_key_value_heads * self.head_dim, bias=False)
-        self.v_proj = nn.Linear(config.hidden_size, config.num_key_value_heads * self.head_dim, bias=False)
-        self.o_proj = nn.Linear(config.num_attention_heads * self.head_dim, config.hidden_size, bias=False)
+        self.q_proj = nn.Linear(config.hidden_size, config.num_attention_heads * self.head_dim, bias=config.attention_bias) # Qwen2本身有Q,K,V的bias, 但我选择去掉
+        self.k_proj = nn.Linear(config.hidden_size, config.num_key_value_heads * self.head_dim, bias=config.attention_bias)
+        self.v_proj = nn.Linear(config.hidden_size, config.num_key_value_heads * self.head_dim, bias=config.attention_bias)
+        self.o_proj = nn.Linear(config.num_attention_heads * self.head_dim, config.hidden_size, bias=config.attention_bias)
         self.sliding_window = config.sliding_window if config.layer_types[layer_idx] == "sliding_attention" else None # 仅滑动窗口注意力层使用sliding_window参数
 
     @deprecate_kwarg("past_key_value", new_name="past_key_values", version="4.58")
@@ -152,7 +152,7 @@ class HJXA_Qwen2Model(MistralModel):
         super().__init__(config)
         self.has_sliding_layers = "sliding_attention" in self.config.layer_types
 
-    @check_model_inputs
+    # @check_model_inputs
     @auto_docstring
     def forward(
         self,
