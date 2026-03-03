@@ -5,8 +5,8 @@ import torch
 from transformers import AutoTokenizer
 import sys
 
-sys.path.append("ms-swift/HJXA/Custom_Model/MiniMind")
-from modeling_minimind import MiniMindForCausalLM, MiniMindConfig
+sys.path.append("ms-swift/HJXA/Custom_Model/hjxa_minimind")
+from modeling_hjxa_minimind import HJXA_MiniMindForCausalLM, HJXA_MiniMindConfig
 
 
 SAVE_ROOT = "./checkpoints/coe_pt_init_models"
@@ -25,6 +25,7 @@ def count_parameters_detail(model):
     block_params = 0
     norm_params = 0
     other_params = 0
+
 
     for name, p in model.named_parameters():
         n = p.numel()
@@ -59,7 +60,7 @@ def count_parameters_detail(model):
 def build_save_one(name, cfg):
     print(f"\n===== Building {name} =====")
 
-    config = MiniMindConfig(
+    config = HJXA_MiniMindConfig(
         vocab_size=6400,
         hidden_size=cfg["hidden_size"],
         intermediate_size=cfg["intermediate_size"],
@@ -69,7 +70,8 @@ def build_save_one(name, cfg):
         tie_word_embeddings=False,
     )
 
-    model = MiniMindForCausalLM(config)
+    model = HJXA_MiniMindForCausalLM(config)
+    print("是否共享权重",model.lm_head.weight.data_ptr()== model.model.embed_tokens.weight.data_ptr())
 
     stats = count_parameters_detail(model)
 

@@ -1,18 +1,18 @@
 # 📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘
-#                                             MiniMind Config
+#                                             HJXA_MiniMind Config
 # 📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘
 
 from transformers import PretrainedConfig
 
 
-class MiniMindConfig(PretrainedConfig):
-    model_type = "minimind"
+class HJXA_MiniMindConfig(PretrainedConfig):
+    model_type = "hjxa_minimind"
 
     def __init__(
             self,
             dropout: float = 0.0, # 现在都不用dropout了,保持0.0
-            bos_token_id = None, # Qwen2 没有Bos
-            eos_token_id: int = 151643,
+            bos_token_id = 1, # Qwen2 没有Bos
+            eos_token_id: int = 2,
             hidden_act: str = 'silu', # 激活函数设置
             hidden_size: int = 512,
             intermediate_size: int = None,
@@ -82,7 +82,7 @@ class MiniMindConfig(PretrainedConfig):
 
 
 # 📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘
-#                                             MiniMind Model
+#                                             HJXA_MiniMind Model
 # 📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘
 
 
@@ -162,7 +162,7 @@ def repeat_kv(x: torch.Tensor, n_rep: int) -> torch.Tensor:
 
 
 class Attention(nn.Module):
-    def __init__(self, args: MiniMindConfig):
+    def __init__(self, args: HJXA_MiniMindConfig):
         super().__init__()
         self.num_key_value_heads = args.num_attention_heads if args.num_key_value_heads is None else args.num_key_value_heads # Config没有指定KV_Head则为MHA
         assert args.num_attention_heads % self.num_key_value_heads == 0 # 要整除
@@ -245,7 +245,7 @@ class Attention(nn.Module):
 
 # ====================== MLP相关 =========================
 class FeedForward(nn.Module):
-    def __init__(self, config: MiniMindConfig):
+    def __init__(self, config: HJXA_MiniMindConfig):
         super().__init__()
         if config.intermediate_size is None:
             intermediate_size = int(config.hidden_size * 8 / 3)
@@ -289,7 +289,7 @@ ACT2FN = ClassInstantier(ACT2CLS)
 
 # ====================== MoE相关 =========================
 class MoEGate(nn.Module):
-    def __init__(self, config: MiniMindConfig):
+    def __init__(self, config: HJXA_MiniMindConfig):
         super().__init__()
         self.config = config
         self.top_k = config.num_experts_per_tok
@@ -345,7 +345,7 @@ class MoEGate(nn.Module):
 
 
 class MOEFeedForward(nn.Module):
-    def __init__(self, config: MiniMindConfig):
+    def __init__(self, config: HJXA_MiniMindConfig):
         super().__init__()
         self.config = config
         self.experts = nn.ModuleList([
@@ -408,9 +408,9 @@ class MOEFeedForward(nn.Module):
         return expert_cache
 # ====================== 以上为Modular =========================
 
-# ====================== MiniMindBlock和MiniMindModel =========================
-class MiniMindBlock(nn.Module):
-    def __init__(self, layer_id: int, config: MiniMindConfig):
+# ====================== HJXA_MiniMindBlock和HJXA_MiniMindModel =========================
+class HJXA_MiniMindBlock(nn.Module):
+    def __init__(self, layer_id: int, config: HJXA_MiniMindConfig):
         super().__init__()
         self.num_attention_heads = config.num_attention_heads
         self.hidden_size = config.hidden_size
@@ -434,14 +434,14 @@ class MiniMindBlock(nn.Module):
         return hidden_states, present_key_value
 
 
-class MiniMindModel(nn.Module):
-    def __init__(self, config: MiniMindConfig):
+class HJXA_MiniMindModel(nn.Module):
+    def __init__(self, config: HJXA_MiniMindConfig):
         super().__init__()
         self.config = config
         self.vocab_size, self.num_hidden_layers = config.vocab_size, config.num_hidden_layers
         self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size)
         self.dropout = nn.Dropout(config.dropout)
-        self.layers = nn.ModuleList([MiniMindBlock(l, config) for l in range(self.num_hidden_layers)])
+        self.layers = nn.ModuleList([HJXA_MiniMindBlock(l, config) for l in range(self.num_hidden_layers)])
         self.norm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
         freqs_cos, freqs_sin = precompute_freqs_cis(dim=config.hidden_size // config.num_attention_heads,
@@ -487,19 +487,24 @@ class MiniMindModel(nn.Module):
         return hidden_states, presents, aux_loss
 
 
-class MiniMindForCausalLM(PreTrainedModel, GenerationMixin):
-    config_class = MiniMindConfig
+class HJXA_MiniMindForCausalLM(PreTrainedModel, GenerationMixin):
+    config_class = HJXA_MiniMindConfig
     _tied_weights_keys = {"lm_head.weight":"model.embed_tokens.weight"} # 声明共享的权重
 
-    def __init__(self, config: MiniMindConfig = None):
-        self.config = config or MiniMindConfig()
+    def __init__(self, config: HJXA_MiniMindConfig = None):
+        self.config = config or HJXA_MiniMindConfig()
         super().__init__(self.config)
-        self.model = MiniMindModel(self.config)
+        self.model = HJXA_MiniMindModel(self.config)
         self.lm_head = nn.Linear(self.config.hidden_size, self.config.vocab_size, bias=False) # lm_head.weight.shape == (vocab_size, hidden_size)
-        self.model.embed_tokens.weight = self.lm_head.weight # hidden = embedding[input_ids] & logits = hidden @ weight.T 因为有转置所以二者可以相同, 共享权重，但也可以不共享
-        
+        # self.model.embed_tokens.weight = self.lm_head.weight # hidden = embedding[input_ids] & logits = hidden @ weight.T 因为有转置所以二者可以相同, 共享权重，但也可以不共享
 
+        self.post_init()
 
+    def tie_weights(self):
+        self._tie_or_clone_weights(
+            self.lm_head,
+            self.model.embed_tokens
+        )
     def forward(self,
                 input_ids: Optional[torch.Tensor] = None,
                 attention_mask: Optional[torch.Tensor] = None,
