@@ -40,6 +40,7 @@ def register_model(model_meta: ModelMeta, *, exist_ok: bool = False) -> None:
     if model_meta.model_arch:
         model_meta.model_arch = get_model_arch(model_meta.model_arch)
     MODEL_MAPPING[model_type] = model_meta
+    
 
 
 def load_by_unsloth(args):
