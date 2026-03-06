@@ -1,25 +1,24 @@
-from swift.llm.dataset import (
+from swift.dataset import (
     DatasetMeta,
     register_dataset,
     load_dataset,
     SubsetDataset,
     DatasetSyntax,
 )
-from swift.llm.dataset.loader import DatasetLoader
-from swift.llm.dataset.preprocessor import AutoPreprocessor, RowPreprocessor
+from swift.dataset.loader import DatasetLoader
+from swift.dataset.preprocessor import AutoPreprocessor, RowPreprocessor
 from datasets import load_dataset as hf_load_dataset
 from datasets import Dataset as HfDataset
 from typing import Dict, Any, List, Literal, Optional, Tuple, Union
 
 import os
 
-# =========================
-# 2️⃣ Loader
-# =========================
 class FineWeb_Loader(DatasetLoader):
+    def __init__(self,**kwargs):
+        super().__init__(**kwargs)
 
-    @staticmethod
     def load(
+        self,
         dataset_syntax: Optional[DatasetSyntax] = None,
         dataset_meta: Optional[DatasetMeta] = None,
         *,
@@ -39,38 +38,57 @@ class FineWeb_Loader(DatasetLoader):
             "CC-MAIN-2025-26": "data/CC-MAIN-2025-26",
             "sample-350BT": "sample/350BT"
         }
+        datasets = []
 
-        # 2. 获取子集并匹配路径
-        subset_name = dataset_syntax.subsets[0]
-        relative_path = subset_map.get(subset_name)
-        
-        if not relative_path:
-            raise ValueError(f"Unknown FineWeb subset: {subset_name}. Available: {list(subset_map.keys())}")
+        # 🔥 遍历所有子集
+        for subset_name in dataset_syntax.subsets:
 
-        # 3. 拼接最终的通配符路径
-        full_pattern = os.path.join(dataset_meta.dataset_path, relative_path, "*.parquet")
+            relative_path = subset_map.get(subset_name)
+            if not relative_path:
+                raise ValueError(
+                    f"Unknown FineWeb subset: {subset_name}. "
+                    f"Available: {list(subset_map.keys())}"
+                )
 
-        # 4. 直接调用 HuggingFace 加载逻辑
-        # 使用 kwargs.get 确保能够透传 streaming, num_proc 等外部参数
-        dataset = hf_load_dataset(
-            "parquet",
-            data_files=full_pattern,
-            split=kwargs.get("split", "train"),
-            streaming=streaming,
-            num_proc=num_proc,
+            full_pattern = os.path.join(
+                dataset_meta.dataset_path,
+                relative_path,
+                "*.parquet"
+            )
+
+            dataset = hf_load_dataset(
+                "parquet",
+                data_files=full_pattern,
+                split=kwargs.get("split", "train"),
+                streaming=self.streaming,
+                num_proc=self.num_proc,
+            )
+
+            datasets.append(dataset)
+
+        # 🔥 多子集合并
+        if len(datasets) == 1:
+            dataset = datasets[0]
+        else:
+            dataset = concatenate_datasets(datasets)
+
+        # 🔥 后处理
+        if self.columns:
+            dataset = RowPreprocessor.safe_rename_columns(dataset, self.columns)
+
+        dataset = dataset_meta.preprocess_func(
+            dataset,
+            num_proc=self.num_proc,
+            load_from_cache_file=self.load_from_cache_file,
+            strict=self.strict,
         )
 
-        if columns:
-            dataset = RowPreprocessor.safe_rename_columns(dataset, columns)
-        dataset = dataset_meta.preprocess_func(
-            dataset, num_proc=num_proc, load_from_cache_file=load_from_cache_file, strict=strict)
-        if remove_unused_columns:
+        if self.remove_unused_columns:
             dataset = RowPreprocessor.remove_useless_columns(dataset)
+
         return dataset
 
-
-
-def load_local_fineweb(split):
+def register_local_fineweb():
     register_dataset(
         DatasetMeta(
             dataset_path="/ruilab/jxhe/CoE_Monitor/data/fineweb",
@@ -79,13 +97,16 @@ def load_local_fineweb(split):
                 SubsetDataset("CC-MAIN-2025-26", split=["train"]),
                 SubsetDataset("sample-350BT", split=["train"]),
             ],
-            load_function=FineWeb_Loader.load,
+            loader=FineWeb_Loader,
             huge_dataset=True,
         )
     )
 
-    dataset = load_dataset(f"local_fineweb:{split}",num_proc=4,columns={"text":"content"},streaming=True)[0]
 
+
+def load_local_fineweb(split): # To be changed
+    # register_local_fineweb() # 已在源码内集成
+    dataset = load_dataset(f"local_fineweb:{split}",num_proc=4,columns={"text":"content"},streaming=True)[0]
     return dataset
 
     

@@ -289,6 +289,7 @@ def load_dataset(
         ... )
     """
     init_self_cognition_preprocessor(DATASET_MAPPING.get('self-cognition'), model_name, model_author)
+    # ['local_fineweb:sample-350BT', 'local_fineweb:CC-MAIN-2025-26']
     if isinstance(datasets, str):
         datasets = [datasets]
     if not isinstance(seed, np.random.RandomState):
@@ -297,16 +298,16 @@ def load_dataset(
         num_proc = None
     train_datasets = []
     val_datasets = []
-    loader = DatasetLoader(
-        num_proc=num_proc,
-        load_from_cache_file=load_from_cache_file,
-        streaming=streaming,
-        hub_token=hub_token,
-        strict=strict,
-        download_mode=download_mode,
-        columns=columns,  # columns_mapping
-        remove_unused_columns=remove_unused_columns,
-    )
+    # loader = DatasetLoader(
+    #     num_proc=num_proc,
+    #     load_from_cache_file=load_from_cache_file,
+    #     streaming=streaming,
+    #     hub_token=hub_token,
+    #     strict=strict,
+    #     download_mode=download_mode,
+    #     columns=columns,  # columns_mapping
+    #     remove_unused_columns=remove_unused_columns,
+    # )
 
     use_hf_default = use_hf
     if use_hf_default is None:
@@ -324,7 +325,31 @@ def load_dataset(
                 dataset_syntax.dataset = dataset_meta.hf_dataset_id if use_hf else dataset_meta.ms_dataset_id
         else:
             dataset_meta = dataset_syntax.get_dataset_meta(use_hf)
-        train_dataset = loader.load(dataset_syntax, dataset_meta, use_hf=use_hf)
+        # ===========本人修改=============
+        if getattr(dataset_meta, "loader", None) is not None:
+            loader = dataset_meta.loader(
+                num_proc=num_proc,
+                load_from_cache_file=load_from_cache_file,
+                streaming=streaming,
+                hub_token=hub_token,
+                strict=strict,
+                download_mode=download_mode,
+                columns=columns,  # columns_mapping
+                remove_unused_columns=remove_unused_columns,
+            )
+        else:
+            loader = DatasetLoader(
+                num_proc=num_proc,
+                load_from_cache_file=load_from_cache_file,
+                streaming=streaming,
+                hub_token=hub_token,
+                strict=strict,
+                download_mode=download_mode,
+                columns=columns,  # columns_mapping
+                remove_unused_columns=remove_unused_columns,
+            )
+        train_dataset = loader.load(dataset_syntax, dataset_meta, use_hf=use_hf) # 注意大部分参数由self.取得
+        # ===========本人修改=============
         train_dataset, val_dataset = loader.post_process(
             train_dataset,
             dataset_sample=dataset_syntax.dataset_sample,
@@ -337,6 +362,7 @@ def load_dataset(
             train_datasets.append(train_dataset)
         if val_dataset is not None:
             val_datasets.append(val_dataset)
+
 
     if interleave_prob is None:
         train_datasets = loader.concat_datasets(train_datasets)

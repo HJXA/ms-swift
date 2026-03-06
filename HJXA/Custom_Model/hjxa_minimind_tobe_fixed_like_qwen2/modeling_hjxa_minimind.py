@@ -20,7 +20,7 @@ class HJXA_MiniMindConfig(PretrainedConfig):
             num_attention_heads: int = 8, # MHA num_heads = num_key_value_heads; GQA,MQA num_heads (Q的数量) > num_key_value_heads (KV的数量)
             num_hidden_layers: int = 8,
             num_key_value_heads: int = 2,
-            vocab_size: int = 151936, # Qwen2 词表 151936
+            vocab_size: int = 6400, # Qwen2 词表 151936
             rms_norm_eps: float = 1e-05,
             rope_theta: int = 1000000.0,
             inference_rope_scaling: bool = False,
@@ -97,8 +97,8 @@ from torch import nn
 from transformers.activations import ACT2FN
 from typing import Optional, Tuple, List, Union
 from transformers import PreTrainedModel, GenerationMixin, PretrainedConfig
-from transformers.modeling_outputs import CausalLMOutputWithPast
-
+from transformers.modeling_outputs import BaseModelOutputWithPast, CausalLMOutputWithPast
+from transformers.modeling_layers import GradientCheckpointingLayer
 # ============== 归一化 =================
 class RMSNorm(torch.nn.Module):
     def __init__(self, dim: int, eps: float = 1e-5):
@@ -139,6 +139,9 @@ def precompute_freqs_cis(dim: int, end: int = int(32 * 1024), rope_base: float =
 def apply_rotary_pos_emb(q, k, cos, sin, position_ids=None, unsqueeze_dim=1):
     def rotate_half(x):
         return torch.cat((-x[..., x.shape[-1] // 2:], x[..., : x.shape[-1] // 2]), dim=-1)
+
+    # print("cos:", cos.shape)
+    # print("sin:", sin.shape)
 
     q_embed = (q * cos.unsqueeze(unsqueeze_dim)) + (rotate_half(q) * sin.unsqueeze(unsqueeze_dim))
     k_embed = (k * cos.unsqueeze(unsqueeze_dim)) + (rotate_half(k) * sin.unsqueeze(unsqueeze_dim))
@@ -205,6 +208,8 @@ class Attention(nn.Module):
 
         # 施加RoPE旋转编码
         cos, sin = position_embeddings
+        # print("xq",xq.shape)
+        # print("xk",xk.shape)
         xq, xk = apply_rotary_pos_emb(xq, xk, cos, sin)
 
         # kv_cache实现(仅推理)
@@ -409,7 +414,7 @@ class MOEFeedForward(nn.Module):
 # ====================== 以上为Modular =========================
 
 # ====================== HJXA_MiniMindBlock和HJXA_MiniMindModel =========================
-class HJXA_MiniMindBlock(nn.Module):
+class HJXA_MiniMindBlock(GradientCheckpointingLayer):
     def __init__(self, layer_id: int, config: HJXA_MiniMindConfig):
         super().__init__()
         self.num_attention_heads = config.num_attention_heads
@@ -432,6 +437,28 @@ class HJXA_MiniMindBlock(nn.Module):
         hidden_states += residual # 残差
         hidden_states = hidden_states + self.mlp(self.post_attention_layernorm(hidden_states)) # 残差 + MLP(归一化)
         return hidden_states, present_key_value
+    
+    
+class HJXA_MiniMindModelPreTrainedModel(PreTrainedModel):
+    config_class = HJXA_MiniMindConfig
+    _tied_weights_keys = {"lm_head.weight":"model.embed_tokens.weight"} # 声明共享的权重
+    _supports_flash_attn_2 = True
+    supports_gradient_checkpointing = True
+    _can_compile_fullgraph = True
+    _supports_attention_backend = True
+    _can_record_outputs = {
+        "hidden_states": HJXA_MiniMindBlock,
+        "attentions": Attention,
+    }
+
+    _no_split_modules = ["HJXA_MiniMindBlock"]
+    _skip_keys_device_placement = ["past_key_values"]
+    _supports_flash_attn = True
+    _supports_sdpa = True
+    _supports_flex_attn = True
+
+    _can_compile_fullgraph = True
+    _supports_attention_backend = True
 
 
 class HJXA_MiniMindModel(nn.Module):
@@ -470,6 +497,7 @@ class HJXA_MiniMindModel(nn.Module):
             self.freqs_sin[start_pos:start_pos + seq_length]
         )
 
+
         presents = []
         for layer_idx, (layer, past_key_value) in enumerate(zip(self.layers, past_key_values)):
             hidden_states, present = layer(
@@ -481,18 +509,22 @@ class HJXA_MiniMindModel(nn.Module):
             )
             presents.append(present)
 
+
         hidden_states = self.norm(hidden_states)
 
         aux_loss = sum([l.mlp.aux_loss for l in self.layers if isinstance(l.mlp, MOEFeedForward)], hidden_states.new_zeros(1).squeeze())
-        return hidden_states, presents, aux_loss
+        return BaseModelOutputWithPast(
+            last_hidden_state=hidden_states,
+            past_key_values=presents if use_cache else None,
+        ), aux_loss
 
 
-class HJXA_MiniMindForCausalLM(PreTrainedModel, GenerationMixin):
-    config_class = HJXA_MiniMindConfig
-    _tied_weights_keys = {"lm_head.weight":"model.embed_tokens.weight"} # 声明共享的权重
+class HJXA_MiniMindForCausalLM(HJXA_MiniMindModelPreTrainedModel, GenerationMixin):
+    
 
     def __init__(self, config: HJXA_MiniMindConfig = None):
         self.config = config or HJXA_MiniMindConfig()
+        self.gradient_checkpointing = False
         super().__init__(self.config)
         self.model = HJXA_MiniMindModel(self.config)
         self.lm_head = nn.Linear(self.config.hidden_size, self.config.vocab_size, bias=False) # lm_head.weight.shape == (vocab_size, hidden_size)
@@ -513,13 +545,14 @@ class HJXA_MiniMindForCausalLM(PreTrainedModel, GenerationMixin):
                 use_cache: bool = False,
                 logits_to_keep: Union[int, torch.Tensor] = 0,
                 **args):
-        hidden_states, past_key_values, aux_loss = self.model(
+        outputs, aux_loss = self.model(
             input_ids=input_ids,
             attention_mask=attention_mask,
             past_key_values=past_key_values,
             use_cache=use_cache,
             **args
         )
+        hidden_states = outputs.last_hidden_state
         slice_indices = slice(-logits_to_keep, None) if isinstance(logits_to_keep, int) else logits_to_keep
         logits = self.lm_head(hidden_states[:, slice_indices, :])
 
@@ -529,6 +562,6 @@ class HJXA_MiniMindForCausalLM(PreTrainedModel, GenerationMixin):
             shift_labels = labels[..., 1:].contiguous()
             loss = F.cross_entropy(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1), ignore_index=-100)
 
-        output = CausalLMOutputWithPast(loss=loss, logits=logits, past_key_values=past_key_values, hidden_states=hidden_states)
+        output = CausalLMOutputWithPast(loss=loss, logits=logits, past_key_values=past_key_values,hidden_states=outputs.hidden_states,attentions=outputs.attentions)
         output.aux_loss = aux_loss
         return output

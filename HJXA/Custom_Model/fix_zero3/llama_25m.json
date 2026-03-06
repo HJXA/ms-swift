@@ -1,0 +1,19 @@
+{
+
+  "model.layers.0": 0,
+  "model.layers.1": 0,
+
+  "model.layers.2": 1,
+  "model.embed_tokens": 1,
+  "lm_head": 1,
+
+  "model.layers.3": 2,
+  "model.layers.4": 2,
+  "model.norm": 2,
+
+  "model.layers.5": 3,
+  "model.layers.6": 3,
+  "model.layers.7": 3
+
+
+}

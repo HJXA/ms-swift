@@ -4,98 +4,217 @@ import torch
 import torch.nn as nn
 from peft import PeftModel
 from transformers.utils import is_peft_available
-from transformers.trainer import _is_peft_model, OptimizerNames
-from deepspeed.runtime.zero.utils import is_zero_param
-from deepspeed.utils import safe_set_full_grad, safe_set_local_grad, safe_get_full_grad
-from transformers.utils import (
-    is_sagemaker_mp_enabled,
-    is_torch_xpu_available,
-    is_torch_mlu_available,
-    is_torch_musa_available,
-    is_torch_npu_available,
-    is_torch_mps_available,
-    is_torch_hpu_available,
-)
 from transformers.models.auto.modeling_auto import MODEL_FOR_CAUSAL_LM_MAPPING_NAMES
-from accelerate.utils import DistributedType # 确保引入
 import os
 import pickle
 
 
 from swift.utils import get_logger,get_model_parameter_info
-from swift.trainers.trainers import Seq2SeqTrainer_SWIFT 
+from swift.trainers.seq2seq_trainer import Seq2SeqTrainer_Swift
 from swift.trainers.utils import per_token_loss_func, per_token_loss_func_sp
 
-import sys 
-# (保留你的 sys.path 引用)
-sys.path.append("/data/jxhe/LLM/github/Chain-of-Embedding/My/MLLM/utils")
+import threading
+import queue
+import re
+import time
+
+import sys
+sys.path.append("/ruilab/jxhe/CoE_Monitor/utils")
+
 from Layer_Hidden import Layer_Hidden_Train
-from Coe_Scores import CoEScoreInfo
+from Coe_Scores import CoEScoreInfo_Train as CoEScoreInfo
 
 logger = get_logger()
 
-class CoETrainer(Seq2SeqTrainer_SWIFT):
+class CoETrainer(Seq2SeqTrainer_Swift):
     r"""
     继承自 CustomSeq2SeqTrainer, 用于实现自定义的 CoeLoss。
     只覆盖了 compute_loss 方法，保留了父类的所有初始化和辅助功能。
     """
-    def __init__(self, image_token_id = None, test_falg = False, *args, **kwargs):
+    def __init__(self, test_falg = False,CoE_Flag=True,time_test = False, *args, **kwargs):
         super().__init__(*args, **kwargs)
-            
+
+
+        self.CoE_Flag=CoE_Flag
+        self.time_test = time_test
         self.Coe = []
-        self.step_count = 0
+        self.step_count = 0 
 
 
-        # 定义一个状态 Flag: True=冻结视觉(训练语言), False=冻结语言(训练视觉)
-        # 默认 None，等待第一次 compute_loss 赋值
-        self.freeze_vision_flag = None 
-        self.count_label = False
+        
 
         self.input = None
         self.output = None
         self.test_falg = test_falg
-        self.image_token_id = image_token_id
 
-            # print("Tokenizer __dict__ keys:")
-            # for k in self.tokenizer.__dict__.keys():
-            #     print(k)
+        if CoE_Flag:
 
-            # print("=== special_tokens_map ===")
-            # print(self.tokenizer._special_tokens_map)
+            self.save_layer_hidden_root = os.path.join(
+                self.args.output_dir.replace("output", "coe_train_result"),
+                "Layer_Hidden_Train"
+            )
+            os.makedirs(self.save_layer_hidden_root, exist_ok=True)
 
-            # print("=== extra_special_tokens ===")
-            # print(self.tokenizer.extra_special_tokens)
+            self.save_coe_steps = 200
 
-        # 必须用 tokenizer 里已经注册的 token
-        self.image_token_id = self.tokenizer.convert_tokens_to_ids("<|image_pad|>")
+            self.save_coe_step_root = os.path.join(
+                    self.args.output_dir.replace("output", "coe_train_result"),
+                    "coe_select_results",
+                    "step_checkpoint"
+                )
+            os.makedirs(self.save_coe_step_root, exist_ok=True)
 
-        # 强校验（非常重要）
-        assert self.image_token_id != self.tokenizer.unk_token_id, \
-            "<|image_pad|> not found in tokenizer vocab"
+            self.save_coe_root = os.path.join(
+                    self.args.output_dir.replace("output", "coe_train_result"),
+                    "coe_select_results",
+                )
+            os.makedirs(self.save_coe_root, exist_ok=True)
 
-        if not self.count_label and self.accelerator.is_main_process:
-            print("=============MS-SwiFT MY Trainer================")
-            print("image_token_id:", self.image_token_id)
-            self.count_label = True
+            self._try_load_coe_state()
 
-            
 
-    def _count_model_parameters(self,model) -> int:
-        """计算模型的总参数量（含冻结和非冻结参数）。"""
-        if self.accelerator.is_main_process:
+            # 参数训练信息
+            if self.accelerator.is_main_process:
 
-            param_stats = get_model_parameter_info(model)
+                param_stats = get_model_parameter_info(self.model)
 
-            print(param_stats)
-            
-            self.count_label = True
+                print(param_stats)
 
+            # ========异步保存===========
+            self._save_queue = queue.Queue(maxsize=32) 
+            def _async_save_worker():
+                while True:
+                    item = self._save_queue.get()
+                    if item is None:
+                        break
+                    
+                    try:
+                        task_type = item.get("type")
+                        
+                        if task_type == "tensor":
+                            # 处理 Tensor 保存
+                            torch.save(item["data"], item["path"])
+                            
+                        elif task_type == "coe":
+                            # 处理 CoE 保存
+                            with open(item["path"], "wb") as f:
+                                pickle.dump(item["data"], f)
+                                
+                            # 顺便在后台处理文件删除，避免阻塞
+                            for rm_path in item.get("remove_paths", []):
+                                if os.path.exists(rm_path):
+                                    os.remove(rm_path)
+                    except Exception as e:
+                        print(f"[AsyncWorker] 保存出错: {e}")
+                    finally:
+                        self._save_queue.task_done()
+
+            self._save_thread = threading.Thread(
+                target=_async_save_worker,
+                daemon=True
+            )
+            self._save_thread.start()
+
+            print(f"[CoeTrainer] Rank {self.accelerator.process_index} 初始化完成")
+
+    def _submit_async_layer_save(self, tensor, path):
+        """提交 Tensor 保存任务"""
+        self._save_queue.put({"type": "tensor", "data": tensor, "path": path})
+
+    def _submit_async_coe_save(self, coe_data, path, remove_paths):
+        """提交 CoE 列表保存及旧文件清理任务"""
+        self._save_queue.put({
+            "type": "coe", 
+            "data": coe_data, 
+            "path": path, 
+            "remove_paths": remove_paths
+        })
+
+
+    def _try_load_coe_state(self):
+        """
+        尝试从保存目录中加载最新的 Coe 和 step_count
+        """
+        # 1. 构建保存路径 (逻辑需与保存代码完全一致)
+        # 注意：这里假设 self.args.output_dir 已经被父类初始化
+        if not hasattr(self, 'args') or not self.args.output_dir:
+            print("[CoeTrainer] args 中未设置 output_dir，无法加载 CoE 状态。")
+            return
+
+        save_root = self.save_coe_step_root 
+
+        if not os.path.exists(save_root):
+            print(f"[CoeTrainer] 在 {save_root} 未找到之前的 CoE 检查点。将从头开始训练。")
+            return
+
+        # 2. 获取当前进程的 Rank
+        # Accelerator 在 super().__init__ 中已被初始化
+        rank = self.accelerator.process_index
+
+        # 3. 寻找当前 Rank 下最大的 Step 文件
+        # 文件名格式: Step{step}_Rank{rank}_coe.npy
+        pattern = re.compile(fr"Step(\d+)_Rank{rank}_coe\.pkl")
+        
+        max_step = -1
+        target_file = None
+
+        for filename in os.listdir(save_root):
+            match = pattern.match(filename)
+            if match:
+                step = int(match.group(1))
+                if step > max_step:
+                    max_step = step
+                    target_file = filename
+
+        # 4. 加载数据
+        if target_file:
+            full_path = os.path.join(save_root, target_file)
+            try:
+                print(f"[CoeTrainer] Rank {rank}: 正在从 {full_path} 加载 CoE 状态...")
+                with open(full_path, "rb") as f:
+                    loaded_coe = pickle.load(f)
+
+                print("是否有detach",hasattr(loaded_coe[0][0], 'detach'))
+
+                self.Coe = [
+                    (
+                        m.detach().cpu().item() if hasattr(m, 'detach') else m, 
+                        a.detach().cpu().item() if hasattr(a, 'detach') else a, 
+                        select
+                    ) 
+                    for m, a, select in loaded_coe
+                ]
+
+                backup_path = full_path.replace(".pkl", "_reloaded.pkl")
+
+                with open(backup_path, "wb") as f:
+                    pickle.dump(self.Coe, f)
+                
+                print(f"[CoeTrainer] Rank {rank}: 成功备份至 {backup_path}")
+                
+                # 恢复 step_count
+                self.step_count = max_step
+                print(f"[CoeTrainer] Rank {rank}: 恢复成功。步数已设置为 {self.step_count}，CoE 列表长度: {len(self.Coe)}")
+                
+            except Exception as e:
+                print(f"[CoeTrainer] Rank {rank}: 加载 {full_path} 失败。错误信息: {e}")
+                # 如果加载失败，保持初始状态，或者可以选择抛出异常
+        else:
+
+            print(f"[CoeTrainer] Rank {rank}: 在 {save_root} 中未找到匹配的检查点文件。将从头开始训练。")
+        
+
+
+    @override
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
 
         if self.test_falg:
             print("============测试模式=============")
-            
             self.input = inputs 
+
+        if self.time_test:
+            torch.cuda.synchronize()
+            comput_loss_start = time.time()
 
         self.step_count += 1
 
@@ -204,29 +323,27 @@ class CoETrainer(Seq2SeqTrainer_SWIFT):
 
         ### MS-Swift 原 compute_loss 代码结束 ###
 
+
+        if self.time_test:
+            torch.cuda.synchronize()
+            print("raw_compute_loss",time.time()-comput_loss_start)
+            coe_start = time.time()
+
+            print(f"labels 中 -100 比例",(labels == -100).float().mean())
+
+        if not self.CoE_Flag:
+            return (loss, outputs) if return_outputs else loss
+
+
         current_labels = labels if labels is not None else inputs.get('labels')
 
         if current_labels is None:
-            print("================\nWarning: current_labels is None, cannot compute CoE scores in MS-SWIFT Mode.\n================")
-
-        
-
-        # print("inputs __dict__ keys:")
-        # for k in inputs.keys():
-        #     print(k)
-
-        inputs_ids = inputs.get('input_ids', None)
-
-        # if self.step_count == 1:
-        #     print(len(inputs_ids[0]))
-        #     print(inputs_ids[0][50:])
-
-        save_dir = f"{self.args.output_dir.replace('output','coe_train_result')}/Layer_Hidden_Train/Step{self.step_count}_Rank{self.accelerator.process_index}"
+            print("================\nWarning: current_labels is None.\n================")
 
 
 
-        layer_hidden_state = Layer_Hidden_Train(outputs.hidden_states, labels = current_labels,image_token_id = self.image_token_id, inputs_ids = inputs_ids, save_dir = save_dir,steps = self.step_count)  # 调用之前定义的函数
-        inputs_ids = None  # 释放内存
+
+        layer_hidden_state = Layer_Hidden_Train(outputs.hidden_states, labels = current_labels, steps = self.step_count)
         current_labels = None  # 释放内存
 
         if self.test_falg:
@@ -235,117 +352,163 @@ class CoETrainer(Seq2SeqTrainer_SWIFT):
 
         outputs.hidden_states = None  # 释放内存
 
+        rank = self.accelerator.process_index
+        step = self.step_count
+
+        save_path = os.path.join(
+            self.save_layer_hidden_root,
+            f"Step{step}_Rank{rank}.pt"
+        )
+
+        tensor_to_save = (
+            layer_hidden_state
+            .detach()
+            .to(torch.bfloat16)   # 强烈建议压缩
+            .cpu()
+        )
+        self._submit_async_layer_save(tensor_to_save, save_path)
+
+
         batch_size = layer_hidden_state.shape[0]
 
-        # 1. 计算当前 Rank (GPU) 的局部统计
-        local_seeing_count = 0 
-        local_reasoning_count = 0
-        select = 0 
+        total_mag = 0.0
+        total_ang = 0.0
+
 
         for i in range(batch_size):
-            output_L_coe = CoEScoreInfo(layer_hidden_state[i])
+            output_L_coe = CoEScoreInfo(layer_hidden_state[i]) # (Layer,D)
             coe_output_M = output_L_coe.compute_CoE_Mag()
             coe_output_A = output_L_coe.compute_CoE_Ang()
+            coe_r = output_L_coe.compute_CoE_R()
+            coe_c = output_L_coe.compute_CoE_C()
 
-            # if coe_output_A[1] > 0.16 and False: # or True only V and False only L
-            #     select = 0
-            #     local_seeing_count += 1
-            # else:
-            #     select = 1
-            #     local_reasoning_count += 1
+            val_m = coe_output_M[1].detach().cpu().item()
+            val_a = coe_output_A[1].detach().cpu().item()
+            val_r = coe_r.detach().cpu().item()
+            val_c = coe_c.detach().cpu().item()
 
-            self.Coe.append((coe_output_M[1], coe_output_A[1], select))
+            total_mag += val_m
+            total_ang += val_a
+            
+            self.Coe.append((val_m, val_a, val_r,val_c))
             # print(f"\nStep {self.step_count}: Rank: {self.accelerator.process_index}:Sample {i} CoE Mag: {coe_output_M[1]:.4f}, CoE Ang: {coe_output_A[1]:.4f}, Select: {select}")
+        avg_mag = total_mag / batch_size
+        avg_ang = total_ang / batch_size
 
-        layer_hidden_state = None  # 释放内存
-
-        # # ==========================================
-        # # 核心修改 1: 在多卡之间同步计数 (All-Reduce)
-        # # ==========================================
-        # # 将计数转换为 Tensor 放入当前设备
-        # counts_tensor = torch.tensor([local_seeing_count, local_reasoning_count], device=self.accelerator.device)
+        metrics = {
+            "CoE/Avg_Mag": avg_mag,
+            "CoE/Avg_Ang": avg_ang,
+        }
         
-        # # 汇总所有 GPU 的计数 (sum)
-        # # 这样 global_seeing_count 就是整个 batch (所有卡) 的总和
-        # global_counts = self.accelerator.reduce(counts_tensor, reduction="sum")
-        
-        # global_seeing_count = global_counts[0].item()
-        # global_reasoning_count = global_counts[1].item()
+        if self.is_main_process:
+            args = self.args
+            if 'swanlab' in args.report_to:
+                import swanlab
+                swanlab.log(metrics, step=self.step_count)
 
-        # # ==========================================
-        # # 核心修改 2: 只在主进程打印
-        # # ==========================================
-        # if self.accelerator.is_main_process:
-        #     print(f"\nStep{self.step_count}: Global Seeing: {global_seeing_count}, Global Reasoning: {global_reasoning_count}")
+            layer_hidden_state = None  # 释放内存
 
 
-        # # ==========================================
-        # # 核心修改 3: 互斥的冻结/解冻逻辑 (防止全部被冻结)
-        # # ==========================================
-        # if global_seeing_count <= global_reasoning_count:
-        #     # 决策: 冻结 Vision，训练 Language
-        #     self.freeze_vision_flag = True
-        #     self.batch_result.append((global_seeing_count, global_reasoning_count, 1))
-        #     if self.accelerator.is_main_process:
-        #         print(f"Decision: Freeze Vision, Train Language")
-        # else:
-        #     # 决策: 冻结 Language，训练 Vision
-        #     self.freeze_vision_flag = False
-        #     self.batch_result.append((global_seeing_count, global_reasoning_count, 0))
-        #     if self.accelerator.is_main_process:
-        #         print(f"Decision: Freeze Language, Train Vision")
-
-
-
-        if self.step_count != 0 and self.step_count % 50 == 0: # 50
-            coe = self.Coe
-            batch_result = self.batch_result
-
-            save_root = os.path.join(
-                self.args.output_dir.replace("output", "coe_train_result"),
-                "coe_select_results",
-                "step_checkpoint"
-            )
-            os.makedirs(save_root, exist_ok=True)
-
-            rank = self.accelerator.process_index
-            step = self.step_count
-
+        if self.step_count != 0 and self.step_count % self.save_coe_steps == 0:
+            # 【至关重要】必须浅拷贝！防止主线程 append 导致 pickle 迭代报错
+            coe_copy = list(self.Coe)
+            
             # ==================================================
-            # 1️⃣ 当前 step 保存
+            # 1️⃣ 准备当前 step 需保存的路径
             # ==================================================
             coe_path = os.path.join(
-                save_root, f"Step{step}_Rank{rank}_coe.pkl"
+                self.save_coe_step_root, f"Step{step}_Rank{rank}_coe.pkl"
             )
-            batch_path = os.path.join(
-                save_root, f"Step{step}_Rank{rank}_batch_result.pkl"
-            )
-
-            with open(coe_path, "wb") as f:
-                pickle.dump(coe, f)
-
-            # with open(batch_path, "wb") as f:
-            #     pickle.dump(batch_result, f)
-
+            
             # ==================================================
-            # 2️⃣ 删除往前数第二次保存（step - 100）
+            # 2️⃣ 准备需要删除的旧文件路径
             # ==================================================
-            prev2_step = step - 100 # 100
+            prev2_step = step - (self.save_coe_steps * 2) 
+            remove_paths = []
+            
             if prev2_step > 0:
                 old_coe_path = os.path.join(
-                    save_root, f"Step{prev2_step}_Rank{rank}_coe.pkl"
+                    self.save_coe_step_root, f"Step{prev2_step}_Rank{rank}_coe.pkl"
                 )
-                old_batch_path = os.path.join(
-                    save_root, f"Step{prev2_step}_Rank{rank}_batch_result.pkl"
+                old_lt_path = os.path.join(
+                    self.save_coe_step_root, f"Step{prev2_step}_Rank{rank}_lt.pkl"
                 )
+                remove_paths.extend([old_coe_path, old_lt_path])
+                
+            # ==================================================
+            # 3️⃣ 丢给后台线程去慢慢执行 I/O 操作
+            # ==================================================
+            self._submit_async_coe_save(coe_copy, coe_path, remove_paths)
 
-                if os.path.exists(old_coe_path):
-                    os.remove(old_coe_path)
-
-                # if os.path.exists(old_batch_path):
-                #     os.remove(old_batch_path)
-
+        if self.time_test:
+            torch.cuda.synchronize()
+            print("coe_add",time.time()-coe_start)
+            
 
         return (loss, outputs) if return_outputs else loss
 
-   
+
+    def training_step(
+        self,
+        model: nn.Module,
+        inputs: dict[str, torch.Tensor | Any],
+        num_items_in_batch: torch.Tensor | int | None = None,
+    ) -> torch.Tensor:
+        """
+        Perform a training step on a batch of inputs.
+
+        Subclass and override to inject custom behavior.
+
+        Args:
+            model (`nn.Module`):
+                The model to train.
+            inputs (`dict[str, torch.Tensor | Any]`):
+                The inputs and targets of the model.
+
+                The dictionary will be unpacked before being fed to the model. Most models expect the targets under the
+                argument `labels`. Check your model's documentation for all accepted arguments.
+
+        Return:
+            `torch.Tensor`: The tensor with training loss on this batch.
+        """
+        # Prepare buffers for context parallelism
+
+        if self.time_test:
+            torch.cuda.synchronize()
+            step_start = time.time()
+
+        loss = super().training_step(model, inputs, num_items_in_batch)
+
+        if self.time_test:
+            torch.cuda.synchronize()
+            print("step_time=",time.time()-step_start)
+
+        return loss
+
+
+        
+    def on_train_end(self):
+        super().on_train_end()
+
+        self._save_queue.join()
+        self._save_queue.put(None)
+        self._save_thread.join()
+
+        try:
+            if hasattr(self, "Coe"):
+                import pickle
+                coe = self.Coe
+                with open(os.path.join(self.save_coe_root, f"Rank{self.accelerator.process_index}_coe.pkl"), "wb") as f:
+                    pickle.dump(coe, f)
+
+            print(f"Coe results saved successfully for Rank {self.accelerator.process_index}.")
+        except Exception as e:
+            print(f"Failed to save Coe results: {e}")
+
+
+
+
+
+
+
+

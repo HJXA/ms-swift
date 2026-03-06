@@ -12,6 +12,7 @@ from swift.utils import Processor
 from swift import get_model_processor
 
 
+
 import sys
 sys.path.append("ms-swift/HJXA/Custom_Model/hjxa_minimind")
 from modeling_hjxa_minimind import HJXA_MiniMindForCausalLM, HJXA_MiniMindConfig
@@ -19,21 +20,22 @@ from modeling_hjxa_minimind import HJXA_MiniMindForCausalLM, HJXA_MiniMindConfig
 from transformers import AutoConfig, AutoModelForCausalLM
 
 
-# class HJXA_MiniMind_ModelLoader(ModelLoader):
+class HJXA_MiniMind_ModelLoader(ModelLoader):
 
-#     def get_config(self, model_dir: str) -> PretrainedConfig:
-#         return HJXA_MiniMindConfig.from_pretrained(model_dir)
+    def get_config(self, model_dir: str) -> PretrainedConfig:
+        return HJXA_MiniMindConfig.from_pretrained(model_dir)
 
-#     def get_processor(self, model_dir: str, config: PretrainedConfig) -> Processor:
-#         return AutoTokenizer.from_pretrained(model_dir, trust_remote_code=True)
+    def get_processor(self, model_dir: str, config: PretrainedConfig) -> Processor:
+        return AutoTokenizer.from_pretrained(model_dir, trust_remote_code=True)
 
-#     def get_model(self, model_dir: str, config: PretrainedConfig, processor: Processor,
-#                   model_kwargs) -> PreTrainedModel:
-#         return HJXA_MiniMindForCausalLM.from_pretrained(
-#             model_dir, config=config, torch_dtype=self.torch_dtype, **model_kwargs)
+    def get_model(self, model_dir: str, config: PretrainedConfig, processor: Processor,
+                  model_kwargs) -> PreTrainedModel:
+        return HJXA_MiniMindForCausalLM.from_pretrained(
+            model_dir, config=config, torch_dtype=self.torch_dtype, **model_kwargs)
 
-def load_hjxa_minimind(model_path):
+def register_hjxa_minimind():
 
+    print("register_hjxa_minimind ing~")
 
     AutoConfig.register(
         "hjxa_minimind",
@@ -56,10 +58,12 @@ def load_hjxa_minimind(model_path):
                             Model('HJXA/HJXA_MiniMind_104M', 'HJXA/HJXA_MiniMind_104M'),])
             ],
             template='minimind',
-            # loader = HJXA_MiniMind_ModelLoader,
+            loader = HJXA_MiniMind_ModelLoader,
             is_multimodal=False,
         ))
-    
+
+def load_hjxa_minimind(model_path):
+    register_hjxa_minimind()
     model, tokenizer = get_model_processor(model_path)
     return model, tokenizer
     

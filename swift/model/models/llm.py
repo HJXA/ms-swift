@@ -1,5 +1,5 @@
 # Copyright (c) ModelScope Contributors. All rights reserved.
-from transformers import AutoTokenizer, PretrainedConfig
+from transformers import AutoConfig, AutoModelForCausalLM, PretrainedConfig, AutoTokenizer
 from typing import Any, Dict
 
 from swift.template import TemplateType
@@ -10,6 +10,108 @@ from ..model_meta import Model, ModelGroup, ModelMeta
 from ..register import ModelLoader, SentenceTransformersLoader, register_model
 
 logger = get_logger()
+
+# ============================ 本人新增=====================
+
+
+
+
+# hjxa_minimind
+
+import sys
+sys.path.append("ms-swift/HJXA/Custom_Model/hjxa_minimind_tobe_fixed_like_qwen2")
+from modeling_hjxa_minimind import HJXA_MiniMindForCausalLM, HJXA_MiniMindConfig
+
+class HJXA_MiniMind_ModelLoader(ModelLoader):
+
+    def get_config(self, model_dir: str) -> PretrainedConfig:
+        return HJXA_MiniMindConfig.from_pretrained(model_dir)
+
+    def get_processor(self, model_dir: str, config: PretrainedConfig):
+        return AutoTokenizer.from_pretrained(model_dir, trust_remote_code=True)
+
+    def get_model(self, model_dir: str, config: PretrainedConfig, processor,
+                  model_kwargs):
+        return HJXA_MiniMindForCausalLM.from_pretrained(
+            model_dir, config=config, torch_dtype=self.torch_dtype, **model_kwargs)
+
+
+AutoConfig.register(
+    "hjxa_minimind",
+    HJXA_MiniMindConfig
+)
+
+AutoModelForCausalLM.register(
+    HJXA_MiniMindConfig,
+    HJXA_MiniMindForCausalLM
+)
+
+register_model(
+    ModelMeta(
+        model_type='hjxa_minimind',
+        model_groups=[
+            ModelGroup([Model('HJXA/HJXA_MiniMind_0.5B', 'HJXA/HJXA_MiniMind_0.5B'),
+                        Model('HJXA/HJXA_MiniMind_1B', 'HJXA/HJXA_MiniMind_1B'),
+                        Model('HJXA/HJXA_MiniMind_25M', 'HJXA/HJXA_MiniMind_25M'),
+                        Model('HJXA/HJXA_MiniMind_55M', 'HJXA/HJXA_MiniMind_55M'),
+                        Model('HJXA/HJXA_MiniMind_104M', 'HJXA/HJXA_MiniMind_104M'),])
+        ],
+        template='minimind',
+        loader = HJXA_MiniMind_ModelLoader,
+        is_multimodal=False,
+    ),
+    exist_ok=True)
+
+
+# hjxa_qwen2
+
+import sys
+sys.path.append("ms-swift/HJXA/Custom_Model/hjxa_qwen2")
+from modeling_hjxa_qwen2 import HJXA_Qwen2ForCausalLM, HJXA_Qwen2Config
+
+class HJXA_Qwen2_ModelLoader(ModelLoader):
+
+    def get_config(self, model_dir: str) -> PretrainedConfig:
+        return HJXA_Qwen2Config.from_pretrained(model_dir)
+
+    def get_processor(self, model_dir: str, config: PretrainedConfig):
+        return AutoTokenizer.from_pretrained(model_dir, trust_remote_code=True)
+
+    def get_model(self, model_dir: str, config: PretrainedConfig, processor,
+                  model_kwargs):
+        return HJXA_Qwen2ForCausalLM.from_pretrained(
+            model_dir, config=config, torch_dtype=self.torch_dtype, **model_kwargs)
+
+AutoConfig.register(
+    "hjxa_qwen2",
+    HJXA_Qwen2Config
+)
+
+AutoModelForCausalLM.register(
+    HJXA_Qwen2Config,
+    HJXA_Qwen2ForCausalLM
+)
+
+register_model(
+    ModelMeta(
+        model_type='hjxa_qwen2',
+        model_groups=[
+            ModelGroup([Model('HJXA/HJXA_Qwen2_0.5B', 'HJXA/HJXA_Qwen2_0.5B'),
+                        Model('HJXA/HJXA_Qwen2_1B', 'HJXA/HJXA_Qwen2_1B'),
+                        Model('HJXA/HJXA_Qwen2_25M', 'HJXA/HJXA_Qwen2_25M'),
+                        Model('HJXA/HJXA_Qwen2_55M', 'HJXA/HJXA_Qwen2_55M'),
+                        Model('HJXA/HJXA_Qwen2_104M', 'HJXA/HJXA_Qwen2_104M'),])
+        ],
+        template='qwen',
+        loader = HJXA_Qwen2_ModelLoader,
+        is_multimodal=False,
+    ),
+    exist_ok=True)
+
+
+
+
+# ============================ 本人新增=====================
 
 
 class GrokLoader(ModelLoader):

@@ -5,6 +5,7 @@ __pycache__/
 *.py[cod]
 *$py.class
 test.py
+coe_train_result
 # C extensions
 *.so
 

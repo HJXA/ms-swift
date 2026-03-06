@@ -3,18 +3,16 @@ import os
 import gc
 import torch
 from transformers import AutoTokenizer
-import sys
-
-sys.path.append("ms-swift/HJXA/Custom_Model/hjxa_qwen2")
-from configuration_hjxa_qwen2 import HJXA_Qwen2Config
-from modeling_hjxa_qwen2 import HJXA_Qwen2ForCausalLM
+from transformers import LlamaConfig, LlamaForCausalLM
 
 
 SAVE_ROOT = "./checkpoints/coe_pt_init_models"
 os.makedirs(SAVE_ROOT, exist_ok=True)
 
 # tokenizer 只加载一次
-tokenizer = AutoTokenizer.from_pretrained("checkpoints/MiniMind2")
+tokenizer = AutoTokenizer.from_pretrained("checkpoints/MiniMind2",model_max_length=2048)
+
+
 
 
 def count_parameters_detail(model):
@@ -60,7 +58,7 @@ def count_parameters_detail(model):
 def build_save_one(name, cfg):
     print(f"\n===== Building {name} =====")
 
-    config = HJXA_Qwen2Config(
+    config = LlamaConfig(
         vocab_size=6400,
         hidden_size=cfg["hidden_size"],
         intermediate_size=cfg["intermediate_size"],
@@ -71,7 +69,7 @@ def build_save_one(name, cfg):
         max_position_embeddings=2048,
     )
 
-    model = HJXA_Qwen2ForCausalLM(config)
+    model = LlamaForCausalLM(config)
 
     stats = count_parameters_detail(model)
 
@@ -100,7 +98,7 @@ def build_save_one(name, cfg):
 
     print("-" * 60)
 
-    save_path = os.path.join(SAVE_ROOT, f"HJXA_Qwen2_{name}")
+    save_path = os.path.join(SAVE_ROOT, f"Llama_{name}")
     os.makedirs(save_path, exist_ok=True)
 
     model.save_pretrained(save_path)
