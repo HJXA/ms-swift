@@ -98,6 +98,7 @@ class BaseDatasetLoader(ABC):
             return
         if len(datasets) == 1:
             return datasets[0]
+        
         return concatenate_datasets(datasets)
 
     @staticmethod

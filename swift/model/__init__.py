@@ -12,3 +12,5 @@ from .utils import get_ckpt_dir, get_default_torch_dtype, get_llm_model, save_ch
 
 if is_torch_npu_available():
     from . import npu_patcher
+
+

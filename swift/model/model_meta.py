@@ -161,8 +161,11 @@ def get_model_name(model_id_or_path: str) -> Optional[str]:
 
 def get_matched_model_meta(model_id_or_path: str) -> Optional[ModelMeta]:
     model_name = get_model_name(model_id_or_path).lower()
-    for model_type, model_meta in MODEL_MAPPING.items():
+    for model_type, model_meta in MODEL_MAPPING.items():     
+        
         model_group = ModelMeta.get_matched_model_group(model_meta, model_name)
+    
+        
         if model_group is not None:
             model_meta = deepcopy(model_meta)
             for k, v in asdict(model_group).items():

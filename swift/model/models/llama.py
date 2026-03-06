@@ -31,6 +31,12 @@ register_model(
                     Model('modelscope/Llama-2-7b-ms', 'meta-llama/Llama-2-7b-hf'),
                     Model('modelscope/Llama-2-13b-ms', 'meta-llama/Llama-2-13b-hf'),
                     Model('modelscope/Llama-2-70b-ms', 'meta-llama/Llama-2-70b-hf'),
+                    # 本人新增
+                    Model('HJXA/Llama_0.5B', 'HJXA/Llama_0.5B'),
+                    Model('HJXA/Llama_1B', 'HJXA/Llama_1B'),
+                    Model('HJXA/Llama_25M', 'HJXA/Llama_25M'),
+                    Model('HJXA/Llama_55M', 'HJXA/Llama_55M'),
+                    Model('HJXA/Llama_104M', 'HJXA/Llama_104M'),
                     # chat
                     Model('modelscope/Llama-2-7b-chat-ms', 'meta-llama/Llama-2-7b-chat-hf'),
                     Model('modelscope/Llama-2-13b-chat-ms', 'meta-llama/Llama-2-13b-chat-hf'),

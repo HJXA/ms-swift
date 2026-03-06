@@ -178,6 +178,12 @@ class SwiftSft(SwiftPipeline, TunerMixin):
             logger.info(f'args.problem_type: {args.problem_type}')
         args.save_args()
 
+        for i,x in enumerate(train_dataset):
+            if i== 1:
+                break
+            print(x)
+
+
         # Some tuners require train_dataset and data_collator for preparation: LoRA-GA
         self.model = self.prepare_model(self.args, self.model, template=self.template, train_dataset=train_dataset)
         logger.info(f'model: {self.model}')
