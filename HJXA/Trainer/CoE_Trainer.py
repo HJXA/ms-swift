@@ -55,7 +55,9 @@ class CoETrainer(Seq2SeqTrainer_Swift):
             )
             os.makedirs(self.save_layer_hidden_root, exist_ok=True)
 
-            self.save_coe_steps = 200
+            self.save_coe_steps = hasattr(self.args, "save_steps") and self.args.save_steps or 500  # 每隔多少步保存一次 CoE 数据
+
+            print(f"[CoeTrainer] CoE_Flag is True. CoE 数据将每 {self.save_coe_steps} 步保存一次。")
 
             self.save_coe_step_root = os.path.join(
                     self.args.output_dir.replace("output", "coe_train_result"),
@@ -137,15 +139,23 @@ class CoETrainer(Seq2SeqTrainer_Swift):
         """
         # 1. 构建保存路径 (逻辑需与保存代码完全一致)
         # 注意：这里假设 self.args.output_dir 已经被父类初始化
-        if not hasattr(self, 'args') or not self.args.output_dir:
-            print("[CoeTrainer] args 中未设置 output_dir，无法加载 CoE 状态。")
+        if not hasattr(self, 'args') or not self.args.resume_from_checkpoint:
+            print("[CoeTrainer] args 中未设置 resume_from_checkpoint，无法加载 CoE 状态。")
             return
 
-        save_root = self.save_coe_step_root 
+        parent_dir = os.path.dirname(self.args.resume_from_checkpoint)
+    
+        # 2. 将路径中的 "output" 替换为 "coe_train_result"
+        # 结果为：/ruilab/jxhe/CoE_Monitor/ms-swift/coe_train_result/PT_HJXA_Llama_25M/v0-20260306-173634
+        save_root = parent_dir.replace("/output/", "/coe_train_result/")
+        save_root = os.path.join(save_root, "coe_select_results", "step_checkpoint")
+
+
 
         if not os.path.exists(save_root):
             print(f"[CoeTrainer] 在 {save_root} 未找到之前的 CoE 检查点。将从头开始训练。")
             return
+
 
         # 2. 获取当前进程的 Rank
         # Accelerator 在 super().__init__ 中已被初始化
@@ -155,7 +165,7 @@ class CoETrainer(Seq2SeqTrainer_Swift):
         # 文件名格式: Step{step}_Rank{rank}_coe.npy
         pattern = re.compile(fr"Step(\d+)_Rank{rank}_coe\.pkl")
         
-        max_step = -1
+        max_step = 0
         target_file = None
 
         for filename in os.listdir(save_root):
@@ -180,9 +190,11 @@ class CoETrainer(Seq2SeqTrainer_Swift):
                     (
                         m.detach().cpu().item() if hasattr(m, 'detach') else m, 
                         a.detach().cpu().item() if hasattr(a, 'detach') else a, 
-                        select
+                        r.detach().cpu().item() if hasattr(r, 'detach') else r,
+                        c.detach().cpu().item() if hasattr(c, 'detach') else c
+                        
                     ) 
-                    for m, a, select in loaded_coe
+                    for m, a, r, c in loaded_coe
                 ]
 
                 backup_path = full_path.replace(".pkl", "_reloaded.pkl")
@@ -191,14 +203,41 @@ class CoETrainer(Seq2SeqTrainer_Swift):
                     pickle.dump(self.Coe, f)
                 
                 print(f"[CoeTrainer] Rank {rank}: 成功备份至 {backup_path}")
+
+                if rank == 0:
+                    args = self.args
+                    if 'swanlab' in args.report_to:
+                        import swanlab
+                        
+                        # --- 1. 补推历史 loaded_coe 数据 ---
+                        # 假设你每次保存或记录 CoE 数据的间隔是固定的，比如 args.eval_steps 或 args.logging_steps
+                        # 这里需要替换为你实际保存 m, a 时的真实步数间隔
+                        interval = args.logging_steps if hasattr(args, 'logging_steps') else 1
+                        
+                        for idx, (m, a, r, c) in enumerate(self.Coe):
+                            # 还原真实的 step：假设记录是从 interval 开始，或者是 (idx+1)*interval
+                            # 请务必根据你当初保存 CoE 数据时的 step 逻辑来调整这个公式
+                            history_step = (idx + 1) * interval  
+                            
+                            history_metrics = {
+                                "CoE/Mag": m,
+                                "CoE/Ang": a,
+                            }
+                            # 将历史的 m 和 a 补录到 SwanLab
+                            swanlab.log(history_metrics, step=history_step)
+
+                            print(f"[CoeTrainer] Rank {rank}: 恢复成功。步数已设置为 {max_step}，CoE 列表长度: {len(self.Coe)}")
+                        
                 
-                # 恢复 step_count
-                self.step_count = max_step
-                print(f"[CoeTrainer] Rank {rank}: 恢复成功。步数已设置为 {self.step_count}，CoE 列表长度: {len(self.Coe)}")
+               
                 
             except Exception as e:
                 print(f"[CoeTrainer] Rank {rank}: 加载 {full_path} 失败。错误信息: {e}")
                 # 如果加载失败，保持初始状态，或者可以选择抛出异常
+            finally:
+                # 恢复 step_count
+                self.step_count = max_step
+                
         else:
 
             print(f"[CoeTrainer] Rank {rank}: 在 {save_root} 中未找到匹配的检查点文件。将从头开始训练。")
@@ -400,13 +439,13 @@ class CoETrainer(Seq2SeqTrainer_Swift):
             "CoE/Avg_Ang": avg_ang,
         }
         
-        if self.is_main_process:
+        if rank == 0:
             args = self.args
             if 'swanlab' in args.report_to:
                 import swanlab
                 swanlab.log(metrics, step=self.step_count)
 
-            layer_hidden_state = None  # 释放内存
+        layer_hidden_state = None  # 释放内存
 
 
         if self.step_count != 0 and self.step_count % self.save_coe_steps == 0:
@@ -430,10 +469,8 @@ class CoETrainer(Seq2SeqTrainer_Swift):
                 old_coe_path = os.path.join(
                     self.save_coe_step_root, f"Step{prev2_step}_Rank{rank}_coe.pkl"
                 )
-                old_lt_path = os.path.join(
-                    self.save_coe_step_root, f"Step{prev2_step}_Rank{rank}_lt.pkl"
-                )
-                remove_paths.extend([old_coe_path, old_lt_path])
+         
+                remove_paths.extend([old_coe_path])
                 
             # ==================================================
             # 3️⃣ 丢给后台线程去慢慢执行 I/O 操作
