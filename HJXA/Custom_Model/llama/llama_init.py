@@ -115,11 +115,13 @@ def build_save_one(name, cfg):
 
 
 # 依次构建（一个一个来） 
-MODEL_SIZES = [ ("25M", dict(hidden_size=512, num_hidden_layers=8, num_attention_heads=8, num_key_value_heads=2, intermediate_size=1365)), 
-               ("55M", dict(hidden_size=768, num_hidden_layers=8, num_attention_heads=8, num_key_value_heads=2, intermediate_size=2048)), 
-               ("104M", dict(hidden_size=768, num_hidden_layers=16, num_attention_heads=8, num_key_value_heads=2, intermediate_size=2048)), 
-               ("0.5B", dict(hidden_size=1536, num_hidden_layers=20, num_attention_heads=16, num_key_value_heads=8, intermediate_size=4096)), 
-               ("1B", dict(hidden_size=1536, num_hidden_layers=32, num_attention_heads=16, num_key_value_heads=8, intermediate_size=6144)), 
+MODEL_SIZES = [ 
+               ("14M", dict(hidden_size=512, num_hidden_layers=5, num_attention_heads=8, num_key_value_heads=2, intermediate_size=1024)), 
+            #    ("25M", dict(hidden_size=512, num_hidden_layers=8, num_attention_heads=8, num_key_value_heads=2, intermediate_size=1365)), 
+            #    ("55M", dict(hidden_size=768, num_hidden_layers=8, num_attention_heads=8, num_key_value_heads=2, intermediate_size=2048)), 
+            #    ("104M", dict(hidden_size=768, num_hidden_layers=16, num_attention_heads=8, num_key_value_heads=2, intermediate_size=2048)), 
+            #    ("0.5B", dict(hidden_size=1536, num_hidden_layers=20, num_attention_heads=16, num_key_value_heads=8, intermediate_size=4096)), 
+            #    ("1B", dict(hidden_size=1536, num_hidden_layers=32, num_attention_heads=16, num_key_value_heads=8, intermediate_size=6144)), 
             ]
 
 for name, cfg in MODEL_SIZES:
