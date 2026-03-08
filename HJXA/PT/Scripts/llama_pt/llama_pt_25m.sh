@@ -5,8 +5,8 @@ export NPROC_PER_NODE=4
 export CUDA_VISIBLE_DEVICES=4,5,6,7
 export NCCL_P2P_LEVEL=NVL
 
-export SWANLAB_RESUME=True
-export SWANLAB_RUN_ID=2k8veeqyysh3os714ho1r
+# export SWANLAB_RESUME=True
+# export SWANLAB_RUN_ID=2k8veeqyysh3os714ho1r
 
 # 统一设置输出路径
 export OUTPUT_DIR="/ruilab/jxhe/CoE_Monitor/ms-swift/output/PT_HJXA_Llama_25M"
@@ -23,11 +23,11 @@ swift pt \
   --swanlab_token WODn49OiskSyv0qBnFZcL \
   --swanlab_project CoE_PT_Main_HJXA_Llama \
   --save_steps 200 \
-  --max_steps 130000 \
+  --max_steps 400000 \
   --lr_scheduler_type warmup_stable_decay \
   --lr_scheduler_kwargs '{"num_decay_steps":0}' \
   --warmup_steps 5000 \
-  --cached_dataset ./data/fineweb_cached/CC-MAIN-2025-26/train /ruilab/jxhe/CoE_Monitor/data/fineweb_cached/sample-350BT/part1/train \
+  --cached_dataset ./data/fineweb_cached/CC-MAIN-2025-26/train /ruilab/jxhe/CoE_Monitor/data/fineweb_cached/sample-350BT/part1/train /ruilab/jxhe/CoE_Monitor/data/fineweb_cached/sample-350BT/part2/train \
   --load_from_cache_file true \
   --split_dataset_ratio 0 \
   --tuner_type full \
@@ -46,7 +46,7 @@ swift pt \
   --dataloader_num_workers 16 \
   --deepspeed zero2 \
   --save_only_model false \
-  --dataset_shuffle true \
+  --dataset_shuffle false \
   --train_dataloader_shuffle false \
   --use_liger_kernel true  \
   2>&1 | tee $OUTPUT_DIR/train.log

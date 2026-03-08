@@ -204,29 +204,29 @@ class CoETrainer(Seq2SeqTrainer_Swift):
                 
                 print(f"[CoeTrainer] Rank {rank}: 成功备份至 {backup_path}")
 
-                if rank == 0:
-                    args = self.args
-                    if 'swanlab' in args.report_to:
-                        import swanlab
+                # if rank == 0:
+                #     args = self.args
+                #     if 'swanlab' in args.report_to:
+                #         import swanlab
                         
-                        # --- 1. 补推历史 loaded_coe 数据 ---
-                        # 假设你每次保存或记录 CoE 数据的间隔是固定的，比如 args.eval_steps 或 args.logging_steps
-                        # 这里需要替换为你实际保存 m, a 时的真实步数间隔
-                        interval = args.logging_steps if hasattr(args, 'logging_steps') else 1
+                #         # --- 1. 补推历史 loaded_coe 数据 ---
+                #         # 假设你每次保存或记录 CoE 数据的间隔是固定的，比如 args.eval_steps 或 args.logging_steps
+                #         # 这里需要替换为你实际保存 m, a 时的真实步数间隔
+                #         interval = args.logging_steps if hasattr(args, 'logging_steps') else 1
                         
-                        for idx, (m, a, r, c) in enumerate(self.Coe):
-                            # 还原真实的 step：假设记录是从 interval 开始，或者是 (idx+1)*interval
-                            # 请务必根据你当初保存 CoE 数据时的 step 逻辑来调整这个公式
-                            history_step = (idx + 1) * interval  
+                #         for idx, (m, a, r, c) in enumerate(self.Coe):
+                #             # 还原真实的 step：假设记录是从 interval 开始，或者是 (idx+1)*interval
+                #             # 请务必根据你当初保存 CoE 数据时的 step 逻辑来调整这个公式
+                #             history_step = (idx + 1) * interval  
                             
-                            history_metrics = {
-                                "CoE/Mag": m,
-                                "CoE/Ang": a,
-                            }
-                            # 将历史的 m 和 a 补录到 SwanLab
-                            swanlab.log(history_metrics, step=history_step)
+                #             history_metrics = {
+                #                 "CoE/Mag": m,
+                #                 "CoE/Ang": a,
+                #             }
+                #             # 将历史的 m 和 a 补录到 SwanLab
+                #             swanlab.log(history_metrics, step=history_step)
 
-                            print(f"[CoeTrainer] Rank {rank}: 恢复成功。步数已设置为 {max_step}，CoE 列表长度: {len(self.Coe)}")
+                #             print(f"[CoeTrainer] Rank {rank}: 恢复成功。步数已设置为 {max_step}，CoE 列表长度: {len(self.Coe)}")
                         
                 
                
@@ -410,33 +410,44 @@ class CoETrainer(Seq2SeqTrainer_Swift):
 
         batch_size = layer_hidden_state.shape[0]
 
-        total_mag = 0.0
-        total_ang = 0.0
+        # total_mag = 0.0
+        # total_ang = 0.0
+        total_last_ang = 0.0
 
 
         for i in range(batch_size):
             output_L_coe = CoEScoreInfo(layer_hidden_state[i]) # (Layer,D)
-            coe_output_M = output_L_coe.compute_CoE_Mag()
-            coe_output_A = output_L_coe.compute_CoE_Ang()
-            coe_r = output_L_coe.compute_CoE_R()
-            coe_c = output_L_coe.compute_CoE_C()
+            coe_last_ang = output_L_coe.compute_Last_Ang()
 
-            val_m = coe_output_M[1].detach().cpu().item()
-            val_a = coe_output_A[1].detach().cpu().item()
-            val_r = coe_r.detach().cpu().item()
-            val_c = coe_c.detach().cpu().item()
+            # coe_output_M = output_L_coe.compute_CoE_Mag()
+            # coe_output_A = output_L_coe.compute_CoE_Ang()
+            # coe_r = output_L_coe.compute_CoE_R()
+            # coe_c = output_L_coe.compute_CoE_C()
 
-            total_mag += val_m
-            total_ang += val_a
+            # val_m = coe_output_M[1].detach().cpu().item()
+            # val_a = coe_output_A[1].detach().cpu().item()
+            # val_r = coe_r.detach().cpu().item()
+            # val_c = coe_c.detach().cpu().item()
+
+            # total_mag += val_m
+            # total_ang += val_a
+
+
             
-            self.Coe.append((val_m, val_a, val_r,val_c))
+            # self.Coe.append((val_m, val_a, val_r,val_c))
             # print(f"\nStep {self.step_count}: Rank: {self.accelerator.process_index}:Sample {i} CoE Mag: {coe_output_M[1]:.4f}, CoE Ang: {coe_output_A[1]:.4f}, Select: {select}")
-        avg_mag = total_mag / batch_size
-        avg_ang = total_ang / batch_size
+        # avg_mag = total_mag / batch_size
+        # avg_ang = total_ang / batch_size
+
+            val_last_ang = coe_last_ang.detach().cpu().item()
+            total_last_ang += val_last_ang
+
+
 
         metrics = {
-            "CoE/Avg_Mag": avg_mag,
-            "CoE/Avg_Ang": avg_ang,
+            # "CoE/Avg_Mag": avg_mag,
+            # "CoE/Avg_Ang": avg_ang,
+            "CoE/Avg_Last_Ang": total_last_ang / batch_size,
         }
         
         if rank == 0:
@@ -448,7 +459,7 @@ class CoETrainer(Seq2SeqTrainer_Swift):
         layer_hidden_state = None  # 释放内存
 
 
-        if self.step_count != 0 and self.step_count % self.save_coe_steps == 0:
+        if False and self.step_count != 0 and self.step_count % self.save_coe_steps == 0:
             # 【至关重要】必须浅拷贝！防止主线程 append 导致 pickle 迭代报错
             coe_copy = list(self.Coe)
             

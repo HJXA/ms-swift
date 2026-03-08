@@ -1,20 +1,20 @@
 # 环境变量（不要用 \ 拆）
-export MASTER_PORT=29505
+export MASTER_PORT=29506
 export PATH="/ruilab/jxhe/miniconda3/envs/msswift/bin:$PATH"
 export NPROC_PER_NODE=4
-export CUDA_VISIBLE_DEVICES=0,1,2,3
+export CUDA_VISIBLE_DEVICES=4,5,6,7
 export NCCL_P2P_LEVEL=NVL
 
 # export SWANLAB_RESUME=True
 # export SWANLAB_RUN_ID=<exp_id>
 
 # 统一设置输出路径
-export OUTPUT_DIR="/ruilab/jxhe/CoE_Monitor/ms-swift/output/PT_HJXA_Llama_55M"
+export OUTPUT_DIR="/ruilab/jxhe/CoE_Monitor/ms-swift/output/PT_HJXA_Llama_100M"
 # 确保目录存在
 mkdir -p $OUTPUT_DIR
 # 启动训练
 swift pt \
-  --model /ruilab/jxhe/CoE_Monitor/checkpoints/coe_pt_init_models/Llama_55M \
+  --model /ruilab/jxhe/CoE_Monitor/checkpoints/coe_pt_init_models/Llama_100M \
   --packing true \
   --padding_free true \
   --report_to swanlab \
@@ -49,7 +49,7 @@ swift pt \
   --train_dataloader_shuffle false \
   --use_liger_kernel true \
   2>&1 | tee $OUTPUT_DIR/train.log
-# /ruilab/jxhe/CoE_Monitor/data/fineweb_cached/sample-350BT/part1/train /ruilab/jxhe/CoE_Monitor/data/fineweb_cached/sample-350BT/part2/train
+
 #   --dataset local_fineweb \
 #   --columns '{"text":"content"}' \
 #   --streaming true \ AssertionError: Cached dataset does not support streaming
