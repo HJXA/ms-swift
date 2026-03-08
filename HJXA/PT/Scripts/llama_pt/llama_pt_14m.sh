@@ -45,8 +45,8 @@ swift pt \
   --dataloader_num_workers 16 \
   --deepspeed zero2 \
   --save_only_model false \
-  --dataset_shuffle true \
-  --train_dataloader_shuffle true \
+  --dataset_shuffle false \
+  --train_dataloader_shuffle false \
   --use_liger_kernel true \
   2>&1 | tee $OUTPUT_DIR/train.log
 

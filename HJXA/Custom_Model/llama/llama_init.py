@@ -101,8 +101,8 @@ def build_save_one(name, cfg):
     save_path = os.path.join(SAVE_ROOT, f"Llama_{name}")
     os.makedirs(save_path, exist_ok=True)
 
-    model.save_pretrained(save_path)
-    tokenizer.save_pretrained(save_path)
+    # model.save_pretrained(save_path)
+    # tokenizer.save_pretrained(save_path)
 
 
     print(f"Saved to: {save_path}")
@@ -116,6 +116,7 @@ def build_save_one(name, cfg):
 
 # 依次构建（一个一个来） 
 MODEL_SIZES = [ 
+                ("5M", dict(hidden_size=256, num_hidden_layers=5, num_attention_heads=8, num_key_value_heads=2, intermediate_size=682)),
                ("14M", dict(hidden_size=512, num_hidden_layers=5, num_attention_heads=8, num_key_value_heads=2, intermediate_size=1024)), 
             #    ("25M", dict(hidden_size=512, num_hidden_layers=8, num_attention_heads=8, num_key_value_heads=2, intermediate_size=1365)), 
             #    ("55M", dict(hidden_size=768, num_hidden_layers=8, num_attention_heads=8, num_key_value_heads=2, intermediate_size=2048)), 

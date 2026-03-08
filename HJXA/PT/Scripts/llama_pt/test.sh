@@ -7,12 +7,12 @@ export NCCL_P2P_LEVEL=NVL
 export HF_ENDPOINT=https://hf-mirror.com
 
 # 统一设置输出路径
-export OUTPUT_DIR="/ruilab/jxhe/CoE_Monitor/ms-swift/output/test/PT_HJXA_Llama_14M"
+export OUTPUT_DIR="/ruilab/jxhe/CoE_Monitor/ms-swift/output/test/PT_HJXA_Llama_5M"
 # 确保目录存在
 mkdir -p $OUTPUT_DIR
 # 启动训练
 swift pt \
-  --model /ruilab/jxhe/CoE_Monitor/checkpoints/coe_pt_init_models/Llama_14M \
+  --model /ruilab/jxhe/CoE_Monitor/checkpoints/coe_pt_init_models/Llama_5M \
   --packing true \
   --padding_free true \
   --report_to swanlab \
@@ -44,7 +44,7 @@ swift pt \
   --dataloader_num_workers 16 \
   --deepspeed zero2 \
   --save_only_model false \
-  --dataset_shuffle true \
+  --dataset_shuffle false \
   --train_dataloader_shuffle false \
   --use_liger_kernel true \
   2>&1 | tee $OUTPUT_DIR/train.log

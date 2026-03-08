@@ -9,12 +9,12 @@ export NCCL_P2P_LEVEL=NVL
 # export SWANLAB_RUN_ID=<exp_id>
 
 # 统一设置输出路径
-export OUTPUT_DIR="/ruilab/jxhe/CoE_Monitor/ms-swift/output/PT_HJXA_Llama_55M"
+export OUTPUT_DIR="/ruilab/jxhe/CoE_Monitor/ms-swift/output/PT_HJXA_Llama_5M"
 # 确保目录存在
 mkdir -p $OUTPUT_DIR
 # 启动训练
 swift pt \
-  --model /ruilab/jxhe/CoE_Monitor/checkpoints/coe_pt_init_models/Llama_55M \
+  --model /ruilab/jxhe/CoE_Monitor/checkpoints/coe_pt_init_models/Llama_5M \
   --packing true \
   --padding_free true \
   --report_to swanlab \
@@ -22,11 +22,11 @@ swift pt \
   --swanlab_token WODn49OiskSyv0qBnFZcL \
   --swanlab_project CoE_PT_Main_HJXA_Llama \
   --save_steps 500 \
-  --max_steps 100000 \
+  --max_steps 400000 \
   --lr_scheduler_type warmup_stable_decay \
   --lr_scheduler_kwargs '{"num_decay_steps":0}' \
   --warmup_steps 5000 \
-  --cached_dataset ./data/fineweb_cached/CC-MAIN-2025-26/train#51200000 \
+  --cached_dataset ./data/fineweb_cached/CC-MAIN-2025-26/train /ruilab/jxhe/CoE_Monitor/data/fineweb_cached/sample-350BT/part1/train /ruilab/jxhe/CoE_Monitor/data/fineweb_cached/sample-350BT/part2/train \
   --load_from_cache_file true \
   --split_dataset_ratio 0 \
   --tuner_type full \
@@ -49,7 +49,7 @@ swift pt \
   --train_dataloader_shuffle false \
   --use_liger_kernel true \
   2>&1 | tee $OUTPUT_DIR/train.log
-# /ruilab/jxhe/CoE_Monitor/data/fineweb_cached/sample-350BT/part1/train /ruilab/jxhe/CoE_Monitor/data/fineweb_cached/sample-350BT/part2/train
+
 #   --dataset local_fineweb \
 #   --columns '{"text":"content"}' \
 #   --streaming true \ AssertionError: Cached dataset does not support streaming
