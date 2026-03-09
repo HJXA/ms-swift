@@ -411,8 +411,9 @@ class CoETrainer(Seq2SeqTrainer_Swift):
         batch_size = layer_hidden_state.shape[0]
 
         # total_mag = 0.0
-        # total_ang = 0.0
+        total_ang = 0.0
         total_last_ang = 0.0
+        total_z_a = 0.0
 
 
         for i in range(batch_size):
@@ -420,34 +421,37 @@ class CoETrainer(Seq2SeqTrainer_Swift):
             coe_last_ang = output_L_coe.compute_Last_Ang()
 
             # coe_output_M = output_L_coe.compute_CoE_Mag()
-            # coe_output_A = output_L_coe.compute_CoE_Ang()
-            # coe_r = output_L_coe.compute_CoE_R()
-            # coe_c = output_L_coe.compute_CoE_C()
+            coe_output_A = output_L_coe.compute_CoE_Ang()
+
 
             # val_m = coe_output_M[1].detach().cpu().item()
-            # val_a = coe_output_A[1].detach().cpu().item()
-            # val_r = coe_r.detach().cpu().item()
-            # val_c = coe_c.detach().cpu().item()
+            val_a = coe_output_A[1].detach().cpu().item()
+            coe_output_z_A = coe_output_A[3].detach().cpu().item()
+
 
             # total_mag += val_m
-            # total_ang += val_a
-
-
-            
-            # self.Coe.append((val_m, val_a, val_r,val_c))
-            # print(f"\nStep {self.step_count}: Rank: {self.accelerator.process_index}:Sample {i} CoE Mag: {coe_output_M[1]:.4f}, CoE Ang: {coe_output_A[1]:.4f}, Select: {select}")
-        # avg_mag = total_mag / batch_size
-        # avg_ang = total_ang / batch_size
+            total_ang += val_a
+            total_z_a += coe_output_z_A
 
             val_last_ang = coe_last_ang.detach().cpu().item()
             total_last_ang += val_last_ang
 
 
+            
+            # self.Coe.append((0, val_a, 0,0, coe_output_z_A))
+
+        # avg_mag = total_mag / batch_size
+        avg_ang = total_ang / batch_size
+        avg_last_ang = total_last_ang / batch_size
+        avg_z_a = total_z_a / batch_size
+
+           
 
         metrics = {
             # "CoE/Avg_Mag": avg_mag,
-            # "CoE/Avg_Ang": avg_ang,
-            "CoE/Avg_Last_Ang": total_last_ang / batch_size,
+            "CoE/Ang": avg_ang,
+            "CoE/Z_A": avg_z_a,
+            "CoE/Last_Ang": avg_last_ang,
         }
         
         if rank == 0:

@@ -66,7 +66,11 @@ def build_save_one(name, cfg):
         num_attention_heads=cfg["num_attention_heads"],
         num_key_value_heads=cfg["num_key_value_heads"],
         tie_word_embeddings=True,
-        max_position_embeddings=2048,
+        max_position_embeddings=32768,
+        pad_token_id=0,
+        rms_norm_eps=1e-5,
+        rope_parameters={"rope_theta": 1000000.0},
+        use_cache=False,
     )
 
     model = LlamaForCausalLM(config)
@@ -98,11 +102,11 @@ def build_save_one(name, cfg):
 
     print("-" * 60)
 
-    save_path = os.path.join(SAVE_ROOT, f"Llama_{name}")
+    save_path = os.path.join(SAVE_ROOT, f"Llama_minimind_{name}")
     os.makedirs(save_path, exist_ok=True)
 
-    # model.save_pretrained(save_path)
-    # tokenizer.save_pretrained(save_path)
+    model.save_pretrained(save_path)
+    tokenizer.save_pretrained(save_path)
 
 
     print(f"Saved to: {save_path}")
@@ -116,11 +120,11 @@ def build_save_one(name, cfg):
 
 # 依次构建（一个一个来） 
 MODEL_SIZES = [ 
-                ("5M", dict(hidden_size=256, num_hidden_layers=5, num_attention_heads=8, num_key_value_heads=2, intermediate_size=682)),
-               ("14M", dict(hidden_size=512, num_hidden_layers=5, num_attention_heads=8, num_key_value_heads=2, intermediate_size=1024)), 
+                # ("5M", dict(hidden_size=256, num_hidden_layers=5, num_attention_heads=8, num_key_value_heads=2, intermediate_size=682)),
+            #    ("14M", dict(hidden_size=512, num_hidden_layers=5, num_attention_heads=8, num_key_value_heads=2, intermediate_size=1024)), 
             #    ("25M", dict(hidden_size=512, num_hidden_layers=8, num_attention_heads=8, num_key_value_heads=2, intermediate_size=1365)), 
             #    ("55M", dict(hidden_size=768, num_hidden_layers=8, num_attention_heads=8, num_key_value_heads=2, intermediate_size=2048)), 
-            #    ("104M", dict(hidden_size=768, num_hidden_layers=16, num_attention_heads=8, num_key_value_heads=2, intermediate_size=2048)), 
+               ("104M", dict(hidden_size=768, num_hidden_layers=16, num_attention_heads=8, num_key_value_heads=2, intermediate_size=2048)), 
             #    ("0.5B", dict(hidden_size=1536, num_hidden_layers=20, num_attention_heads=16, num_key_value_heads=8, intermediate_size=4096)), 
             #    ("1B", dict(hidden_size=1536, num_hidden_layers=32, num_attention_heads=16, num_key_value_heads=8, intermediate_size=6144)), 
             ]
