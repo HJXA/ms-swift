@@ -39,6 +39,7 @@ register_model(
                     Model('HJXA/Llama_104M', 'HJXA/Llama_104M'),
                     Model('HJXA/Llama_14M', 'HJXA/Llama_14M'),
                     Model('HJXA/Llama_5M', 'HJXA/Llama_5M'),
+                    Model('HJXA/Llama_minimind_104M', 'HJXA/Llama_minimind_104M'),
                     # chat
                     Model('modelscope/Llama-2-7b-chat-ms', 'meta-llama/Llama-2-7b-chat-hf'),
                     Model('modelscope/Llama-2-13b-chat-ms', 'meta-llama/Llama-2-13b-chat-hf'),
