@@ -31,12 +31,11 @@ class CoETrainer(Seq2SeqTrainer_Swift):
     继承自 CustomSeq2SeqTrainer, 用于实现自定义的 CoeLoss。
     只覆盖了 compute_loss 方法，保留了父类的所有初始化和辅助功能。
     """
-    def __init__(self, test_falg = False,CoE_Flag=True,time_test = False, *args, **kwargs):
+    def __init__(self, test_falg = False,CoE_Flag=True, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
 
         self.CoE_Flag=CoE_Flag
-        self.time_test = time_test
         self.Coe = []
         self.step_count = 0 
 
@@ -49,28 +48,30 @@ class CoETrainer(Seq2SeqTrainer_Swift):
 
         if CoE_Flag:
 
-            self.save_layer_hidden_root = os.path.join(
-                self.args.output_dir.replace("output", "coe_train_result"),
-                "Layer_Hidden_Train"
-            )
+            if not hasattr(self, 'args') or not self.args.resume_from_checkpoint: # /ruilab/jxhe/CoE_Monitor/ms-swift/coe_train_result/PT_HJXA_Llama_104M_Minimind/v0-20260309-213557/checkpoint-34000
+
+                self.save_layer_hidden_root = os.path.join(
+                    self.args.output_dir.replace("output", "coe_train_result"),
+                    "Layer_Hidden_Train"
+                )
+            else:
+                try:
+                    base = self.args.resume_from_checkpoint.replace("output", "coe_train_result")
+
+                    self.save_layer_hidden_root = os.path.join(
+                        os.path.dirname(base),
+                        "Layer_Hidden_Train"
+                    )
+                    print(f"[CoeTrainer] 从 checkpoint 路径构建 CoE 保存路径: {self.save_layer_hidden_root}")
+                except Exception as e:
+                    print(f"[CoeTrainer] 从 checkpoint 路径构建 CoE 保存路径失败: {e}")
+                    self.save_layer_hidden_root = os.path.join(
+                        self.args.output_dir.replace("output", "coe_train_result"),
+                        "Layer_Hidden_Train"
+                    )
+                    print(f"[CoeTrainer] 已使用默认路径: {self.save_layer_hidden_root}")
             os.makedirs(self.save_layer_hidden_root, exist_ok=True)
 
-            self.save_coe_steps = hasattr(self.args, "save_steps") and self.args.save_steps or 500  # 每隔多少步保存一次 CoE 数据
-
-            print(f"[CoeTrainer] CoE_Flag is True. CoE 数据将每 {self.save_coe_steps} 步保存一次。")
-
-            self.save_coe_step_root = os.path.join(
-                    self.args.output_dir.replace("output", "coe_train_result"),
-                    "coe_select_results",
-                    "step_checkpoint"
-                )
-            os.makedirs(self.save_coe_step_root, exist_ok=True)
-
-            self.save_coe_root = os.path.join(
-                    self.args.output_dir.replace("output", "coe_train_result"),
-                    "coe_select_results",
-                )
-            os.makedirs(self.save_coe_root, exist_ok=True)
 
             self._try_load_coe_state()
 
@@ -82,55 +83,58 @@ class CoETrainer(Seq2SeqTrainer_Swift):
 
                 print(param_stats)
 
-            # ========异步保存===========
-            self._save_queue = queue.Queue(maxsize=32) 
-            def _async_save_worker():
-                while True:
-                    item = self._save_queue.get()
-                    if item is None:
-                        break
-                    
-                    try:
-                        task_type = item.get("type")
-                        
-                        if task_type == "tensor":
-                            # 处理 Tensor 保存
-                            torch.save(item["data"], item["path"])
-                            
-                        elif task_type == "coe":
-                            # 处理 CoE 保存
-                            with open(item["path"], "wb") as f:
-                                pickle.dump(item["data"], f)
-                                
-                            # 顺便在后台处理文件删除，避免阻塞
-                            for rm_path in item.get("remove_paths", []):
-                                if os.path.exists(rm_path):
-                                    os.remove(rm_path)
-                    except Exception as e:
-                        print(f"[AsyncWorker] 保存出错: {e}")
-                    finally:
-                        self._save_queue.task_done()
-
-            self._save_thread = threading.Thread(
-                target=_async_save_worker,
-                daemon=True
-            )
-            self._save_thread.start()
 
             print(f"[CoeTrainer] Rank {self.accelerator.process_index} 初始化完成")
 
-    def _submit_async_layer_save(self, tensor, path):
-        """提交 Tensor 保存任务"""
-        self._save_queue.put({"type": "tensor", "data": tensor, "path": path})
+            # ========异步保存===========
+    #         self._save_queue = queue.Queue(maxsize=32) 
+    #         def _async_save_worker():
+    #             while True:
+    #                 item = self._save_queue.get()
+    #                 if item is None:
+    #                     break
+                    
+    #                 try:
+    #                     task_type = item.get("type")
+                        
+    #                     if task_type == "tensor":
+    #                         # 处理 Tensor 保存
+    #                         torch.save(item["data"], item["path"])
+                            
+    #                     elif task_type == "coe":
+    #                         # 处理 CoE 保存
+    #                         with open(item["path"], "wb") as f:
+    #                             pickle.dump(item["data"], f)
+                                
+    #                         # 顺便在后台处理文件删除，避免阻塞
+    #                         for rm_path in item.get("remove_paths", []):
+    #                             if os.path.exists(rm_path):
+    #                                 os.remove(rm_path)
+    #                 except Exception as e:
+    #                     print(f"[AsyncWorker] 保存出错: {e}")
+    #                 finally:
+    #                     self._save_queue.task_done()
 
-    def _submit_async_coe_save(self, coe_data, path, remove_paths):
-        """提交 CoE 列表保存及旧文件清理任务"""
-        self._save_queue.put({
-            "type": "coe", 
-            "data": coe_data, 
-            "path": path, 
-            "remove_paths": remove_paths
-        })
+    #         self._save_thread = threading.Thread(
+    #             target=_async_save_worker,
+    #             daemon=True
+    #         )
+    #         self._save_thread.start()
+
+    # def _submit_async_layer_save(self, tensor, path):
+    #     """提交 Tensor 保存任务"""
+    #     self._save_queue.put({"type": "tensor", "data": tensor, "path": path})
+
+    # def _submit_async_coe_save(self, coe_data, path, remove_paths):
+    #     """提交 CoE 列表保存及旧文件清理任务"""
+    #     self._save_queue.put({
+    #         "type": "coe", 
+    #         "data": coe_data, 
+    #         "path": path, 
+    #         "remove_paths": remove_paths
+    #     })
+
+
 
 
     def _try_load_coe_state(self):
@@ -143,115 +147,33 @@ class CoETrainer(Seq2SeqTrainer_Swift):
             print("[CoeTrainer] args 中未设置 resume_from_checkpoint，无法加载 CoE 状态。")
             return
 
-        parent_dir = os.path.dirname(self.args.resume_from_checkpoint)
-    
-        # 2. 将路径中的 "output" 替换为 "coe_train_result"
-        # 结果为：/ruilab/jxhe/CoE_Monitor/ms-swift/coe_train_result/PT_HJXA_Llama_25M/v0-20260306-173634
-        save_root = parent_dir.replace("/output/", "/coe_train_result/")
-        save_root = os.path.join(save_root, "coe_select_results", "step_checkpoint")
+        resume_dir = self.args.resume_from_checkpoint
+        print(f"[CoeTrainer] 尝试从 {resume_dir} 加载步数...")
 
-
-
-        if not os.path.exists(save_root):
-            print(f"[CoeTrainer] 在 {save_root} 未找到之前的 CoE 检查点。将从头开始训练。")
-            return
-
-
-        # 2. 获取当前进程的 Rank
-        # Accelerator 在 super().__init__ 中已被初始化
         rank = self.accelerator.process_index
 
-        # 3. 寻找当前 Rank 下最大的 Step 文件
-        # 文件名格式: Step{step}_Rank{rank}_coe.npy
-        pattern = re.compile(fr"Step(\d+)_Rank{rank}_coe\.pkl")
-        
+        dirname = os.path.basename(resume_dir)   # checkpoint-34000
+
+        pattern = re.compile(r"checkpoint-(\d+)")
+        match = pattern.match(dirname)
+
         max_step = 0
-        target_file = None
+        if match:
+            max_step = int(match.group(1))
 
-        for filename in os.listdir(save_root):
-            match = pattern.match(filename)
-            if match:
-                step = int(match.group(1))
-                if step > max_step:
-                    max_step = step
-                    target_file = filename
+        self.step_count = max_step
 
-        # 4. 加载数据
-        if target_file:
-            full_path = os.path.join(save_root, target_file)
-            try:
-                print(f"[CoeTrainer] Rank {rank}: 正在从 {full_path} 加载 CoE 状态...")
-                with open(full_path, "rb") as f:
-                    loaded_coe = pickle.load(f)
-
-                print("是否有detach",hasattr(loaded_coe[0][0], 'detach'))
-
-                self.Coe = [
-                    (
-                        m.detach().cpu().item() if hasattr(m, 'detach') else m, 
-                        a.detach().cpu().item() if hasattr(a, 'detach') else a, 
-                        r.detach().cpu().item() if hasattr(r, 'detach') else r,
-                        c.detach().cpu().item() if hasattr(c, 'detach') else c
-                        
-                    ) 
-                    for m, a, r, c in loaded_coe
-                ]
-
-                backup_path = full_path.replace(".pkl", "_reloaded.pkl")
-
-                with open(backup_path, "wb") as f:
-                    pickle.dump(self.Coe, f)
-                
-                print(f"[CoeTrainer] Rank {rank}: 成功备份至 {backup_path}")
-
-                # if rank == 0:
-                #     args = self.args
-                #     if 'swanlab' in args.report_to:
-                #         import swanlab
-                        
-                #         # --- 1. 补推历史 loaded_coe 数据 ---
-                #         # 假设你每次保存或记录 CoE 数据的间隔是固定的，比如 args.eval_steps 或 args.logging_steps
-                #         # 这里需要替换为你实际保存 m, a 时的真实步数间隔
-                #         interval = args.logging_steps if hasattr(args, 'logging_steps') else 1
-                        
-                #         for idx, (m, a, r, c) in enumerate(self.Coe):
-                #             # 还原真实的 step：假设记录是从 interval 开始，或者是 (idx+1)*interval
-                #             # 请务必根据你当初保存 CoE 数据时的 step 逻辑来调整这个公式
-                #             history_step = (idx + 1) * interval  
-                            
-                #             history_metrics = {
-                #                 "CoE/Mag": m,
-                #                 "CoE/Ang": a,
-                #             }
-                #             # 将历史的 m 和 a 补录到 SwanLab
-                #             swanlab.log(history_metrics, step=history_step)
-
-                #             print(f"[CoeTrainer] Rank {rank}: 恢复成功。步数已设置为 {max_step}，CoE 列表长度: {len(self.Coe)}")
-                        
-                
-               
-                
-            except Exception as e:
-                print(f"[CoeTrainer] Rank {rank}: 加载 {full_path} 失败。错误信息: {e}")
-                # 如果加载失败，保持初始状态，或者可以选择抛出异常
-            finally:
-                # 恢复 step_count
-                self.step_count = max_step
-                
-        else:
-
-            print(f"[CoeTrainer] Rank {rank}: 在 {save_root} 中未找到匹配的检查点文件。将从头开始训练。")
+        print(f"[CoeTrainer] Rank {rank}: 步数已设置为 {max_step}")
         
 
 
     @override
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
 
-        if self.test_falg:
+
+        if self.test_falg and self.accelerator.is_main_process:
             print("============测试模式=============")
             self.input = inputs 
-
-        if self.time_test:
             torch.cuda.synchronize()
             comput_loss_start = time.time()
 
@@ -363,10 +285,11 @@ class CoETrainer(Seq2SeqTrainer_Swift):
         ### MS-Swift 原 compute_loss 代码结束 ###
 
 
-        if self.time_test:
+        if self.test_falg and self.accelerator.is_main_process:
             torch.cuda.synchronize()
             print("raw_compute_loss",time.time()-comput_loss_start)
             coe_start = time.time()
+            print("labels 的形状",labels.shape)
 
             print(f"labels 中 -100 比例",(labels == -100).float().mean())
 
@@ -385,8 +308,7 @@ class CoETrainer(Seq2SeqTrainer_Swift):
         layer_hidden_state = Layer_Hidden_Train(outputs.hidden_states, labels = current_labels, steps = self.step_count)
         current_labels = None  # 释放内存
 
-        if self.test_falg:
-            print("============测试模式=============")
+        if self.test_falg and self.accelerator.is_main_process:
             self.output = outputs 
 
         outputs.hidden_states = None  # 释放内存
@@ -405,7 +327,17 @@ class CoETrainer(Seq2SeqTrainer_Swift):
             .to(torch.bfloat16)   # 强烈建议压缩
             .cpu()
         )
-        self._submit_async_layer_save(tensor_to_save, save_path)
+
+        # self._submit_async_layer_save(tensor_to_save, save_path)
+
+        if self.test_falg and self.accelerator.is_main_process:
+            torch.cuda.synchronize()
+            save_layer_start = time.time()
+        torch.save(tensor_to_save, save_path)
+        if self.test_falg and self.accelerator.is_main_process:
+            torch.cuda.synchronize()
+            print("save_layer_time",time.time()-save_layer_start)
+        tensor_to_save = None
 
 
         batch_size = layer_hidden_state.shape[0]
@@ -414,11 +346,12 @@ class CoETrainer(Seq2SeqTrainer_Swift):
         total_ang = 0.0
         total_last_ang = 0.0
         total_z_a = 0.0
+        total_ang_sum = 0.0
 
 
         for i in range(batch_size):
             output_L_coe = CoEScoreInfo(layer_hidden_state[i]) # (Layer,D)
-            coe_last_ang = output_L_coe.compute_Last_Ang()
+            
 
             # coe_output_M = output_L_coe.compute_CoE_Mag()
             coe_output_A = output_L_coe.compute_CoE_Ang()
@@ -427,23 +360,26 @@ class CoETrainer(Seq2SeqTrainer_Swift):
             # val_m = coe_output_M[1].detach().cpu().item()
             val_a = coe_output_A[1].detach().cpu().item()
             coe_output_z_A = coe_output_A[3].detach().cpu().item()
+            ang_sum = coe_output_A[4].detach().cpu().item()
 
 
             # total_mag += val_m
             total_ang += val_a
             total_z_a += coe_output_z_A
+            total_ang_sum += ang_sum
 
+
+            coe_last_ang = output_L_coe.compute_Last_Ang()
             val_last_ang = coe_last_ang.detach().cpu().item()
             total_last_ang += val_last_ang
 
-
-            
-            # self.Coe.append((0, val_a, 0,0, coe_output_z_A))
+        output_L_coe = None  # 释放内存
 
         # avg_mag = total_mag / batch_size
         avg_ang = total_ang / batch_size
         avg_last_ang = total_last_ang / batch_size
         avg_z_a = total_z_a / batch_size
+        avg_ang_sum = total_ang_sum / batch_size
 
            
 
@@ -452,6 +388,7 @@ class CoETrainer(Seq2SeqTrainer_Swift):
             "CoE/Ang": avg_ang,
             "CoE/Z_A": avg_z_a,
             "CoE/Last_Ang": avg_last_ang,
+            "CoE/Ang_Sum": avg_ang_sum
         }
         
         if rank == 0:
@@ -462,37 +399,7 @@ class CoETrainer(Seq2SeqTrainer_Swift):
 
         layer_hidden_state = None  # 释放内存
 
-
-        if False and self.step_count != 0 and self.step_count % self.save_coe_steps == 0:
-            # 【至关重要】必须浅拷贝！防止主线程 append 导致 pickle 迭代报错
-            coe_copy = list(self.Coe)
-            
-            # ==================================================
-            # 1️⃣ 准备当前 step 需保存的路径
-            # ==================================================
-            coe_path = os.path.join(
-                self.save_coe_step_root, f"Step{step}_Rank{rank}_coe.pkl"
-            )
-            
-            # ==================================================
-            # 2️⃣ 准备需要删除的旧文件路径
-            # ==================================================
-            prev2_step = step - (self.save_coe_steps * 2) 
-            remove_paths = []
-            
-            if prev2_step > 0:
-                old_coe_path = os.path.join(
-                    self.save_coe_step_root, f"Step{prev2_step}_Rank{rank}_coe.pkl"
-                )
-         
-                remove_paths.extend([old_coe_path])
-                
-            # ==================================================
-            # 3️⃣ 丢给后台线程去慢慢执行 I/O 操作
-            # ==================================================
-            self._submit_async_coe_save(coe_copy, coe_path, remove_paths)
-
-        if self.time_test:
+        if self.test_falg and self.accelerator.is_main_process:
             torch.cuda.synchronize()
             print("coe_add",time.time()-coe_start)
             
@@ -525,13 +432,13 @@ class CoETrainer(Seq2SeqTrainer_Swift):
         """
         # Prepare buffers for context parallelism
 
-        if self.time_test:
+        if self.test_falg and self.accelerator.is_main_process:
             torch.cuda.synchronize()
             step_start = time.time()
 
         loss = super().training_step(model, inputs, num_items_in_batch)
 
-        if self.time_test:
+        if self.test_falg and self.accelerator.is_main_process:
             torch.cuda.synchronize()
             print("step_time=",time.time()-step_start)
 
@@ -539,23 +446,6 @@ class CoETrainer(Seq2SeqTrainer_Swift):
 
 
         
-    def on_train_end(self):
-        super().on_train_end()
-
-        self._save_queue.join()
-        self._save_queue.put(None)
-        self._save_thread.join()
-
-        try:
-            if hasattr(self, "Coe"):
-                import pickle
-                coe = self.Coe
-                with open(os.path.join(self.save_coe_root, f"Rank{self.accelerator.process_index}_coe.pkl"), "wb") as f:
-                    pickle.dump(coe, f)
-
-            print(f"Coe results saved successfully for Rank {self.accelerator.process_index}.")
-        except Exception as e:
-            print(f"Failed to save Coe results: {e}")
 
 
 

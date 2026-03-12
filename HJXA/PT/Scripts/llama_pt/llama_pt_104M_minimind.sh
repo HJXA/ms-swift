@@ -2,20 +2,22 @@
 export MASTER_PORT=29506
 export PATH="/ruilab/jxhe/miniconda3/envs/msswift/bin:$PATH"
 export NPROC_PER_NODE=4
-export CUDA_VISIBLE_DEVICES=4,5,6,7
-export NCCL_P2P_LEVEL=NVL
+export CUDA_VISIBLE_DEVICES=0,1,2,3
 
-# export SWANLAB_RESUME=True
-# export SWANLAB_RUN_ID=<exp_id>
+export SWANLAB_RESUME=True
+export SWANLAB_RUN_ID=nc4jugymx8ykh8yfq5lfp
 
 # 统一设置输出路径
-export OUTPUT_DIR="/ruilab/jxhe/CoE_Monitor/ms-swift/output/PT_HJXA_Llama_104M_Minimind"
+export OUTPUT_DIR="/ruilab/jxhe/CoE_Monitor/ms-swift/output/PT_HJXA_Llama_104M_Minimind" # /test
 # 确保目录存在
 mkdir -p $OUTPUT_DIR
 # 启动训练
+# /ruilab/jxhe/CoE_Monitor/data/c4-subsets_cached/train  
 swift pt \
   --model /ruilab/jxhe/CoE_Monitor/checkpoints/coe_pt_init_models/Llama_minimind_104M \
   --packing true \
+  --packing_num_proc 32 \
+  --resume_from_checkpoint /ruilab/jxhe/CoE_Monitor/ms-swift/output/PT_HJXA_Llama_104M_Minimind/v0-20260309-213557/checkpoint-34000 \
   --padding_free true \
   --report_to swanlab \
   --truncation_strategy right \
@@ -36,13 +38,12 @@ swift pt \
   --learning_rate 5e-4 \
   --gradient_checkpointing true \
   --gradient_accumulation_steps 1 \
-  --ddp_find_unused_parameters true \
   --weight_decay 0.0 \
   --logging_steps 1 \
   --max_length 2048 \
   --output_dir $OUTPUT_DIR \
-  --dataset_num_proc 16 \
-  --dataloader_num_workers 16 \
+  --dataset_num_proc 4 \
+  --dataloader_num_workers 4 \
   --deepspeed zero2 \
   --save_only_model false \
   --dataset_shuffle false \

@@ -9,7 +9,7 @@ export NCCL_P2P_LEVEL=NVL
 # export SWANLAB_RUN_ID=<exp_id>
 
 # 统一设置输出路径
-export OUTPUT_DIR="/ruilab/jxhe/CoE_Monitor/ms-swift/output/PT_HJXA_Llama_55M"
+export OUTPUT_DIR="/ruilab/jxhe/CoE_Monitor/ms-swift/output/PT_HJXA_Llama_55M_low_lr"
 # 确保目录存在
 mkdir -p $OUTPUT_DIR
 LOG_TIME=$(date +"%Y%m%d_%H%M%S")
@@ -17,6 +17,7 @@ LOG_TIME=$(date +"%Y%m%d_%H%M%S")
 swift pt \
   --model /ruilab/jxhe/CoE_Monitor/checkpoints/coe_pt_init_models/Llama_55M \
   --packing true \
+  --packing_num_proc 32 \
   --padding_free true \
   --report_to swanlab \
   --truncation_strategy right \
@@ -34,27 +35,27 @@ swift pt \
   --torch_dtype bfloat16 \
   --per_device_train_batch_size 128 \
   --attn_impl flash_attention_2 \
-  --learning_rate 5e-4 \
+  --learning_rate 1e-4 \
   --gradient_checkpointing true \
   --gradient_accumulation_steps 1 \
-  --ddp_find_unused_parameters true \
   --weight_decay 0.0 \
   --logging_steps 1 \
   --max_length 2048 \
   --output_dir $OUTPUT_DIR \
-  --dataset_num_proc 16 \
-  --dataloader_num_workers 16 \
+  --dataset_num_proc 4 \
+  --dataloader_num_workers 4 \
   --deepspeed zero2 \
   --save_only_model false \
   --dataset_shuffle false \
   --train_dataloader_shuffle false \
   --use_liger_kernel true \
   2>&1 | tee $OUTPUT_DIR/train_${LOG_TIME}.log
-# /ruilab/jxhe/CoE_Monitor/data/fineweb_cached/sample-350BT/part1/train /ruilab/jxhe/CoE_Monitor/data/fineweb_cached/sample-350BT/part2/train
+
+
+# 相较于packing，padding_free不需要额外的预处理时间，但packing的训练速度更快且显存占用更稳定
 #   --dataset local_fineweb \
 #   --columns '{"text":"content"}' \
 #   --streaming true \ AssertionError: Cached dataset does not support streaming
-#   --device_map /ruilab/jxhe/CoE_Monitor/ms-swift/HJXA/Custom_Model/fix_zero3/llama_25m.json \
 
 # device_map: 模型使用的device_map配置，例如：'auto'、'cpu'、json字符串、json文件路径。该参数会透传入transformers的from_pretrained接口。默认为None，根据设备和分布式训练情况自动设置。
 
