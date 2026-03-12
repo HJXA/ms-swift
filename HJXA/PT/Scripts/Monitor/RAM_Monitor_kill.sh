@@ -4,9 +4,9 @@
 # 内存监控与二级精准终止脚本
 # ==========================================
 
-THRESHOLD=95
-START_PID=3981025
-END_PID=3981028
+THRESHOLD=96
+START_PID=2111530
+END_PID=2111533
 TARGET_USER="jxhe"
 PATTERN="swift/cli/pt.py"
 TMUX_SESSION="1"
@@ -15,6 +15,7 @@ TMUX_SESSION="1"
 PYTHON_CLEANED=false
 
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] 高级监控启动... 内存阈值: ${THRESHOLD}%"
+echo "监控目标: 用户 '$TARGET_USER' 的 PID 范围 $START_PID-$END_PID 中包含 '$PATTERN' 的进程"
 
 while true; do
     NOW=$(date '+%Y-%m-%d %H:%M:%S')
@@ -45,7 +46,7 @@ while true; do
             
             # 检查 tmux 会话是否存在
             if tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
-                tmux kill-session -t "$TMUX_SESSION"
+                # tmux kill-session -t "$TMUX_SESSION"
                 echo "[$NOW] [√] 已强制关闭 Tmux 会话 $TMUX_SESSION。"
             else
                 echo "[$NOW] [!] 未发现运行中的 Tmux 会话 $TMUX_SESSION。"
@@ -57,5 +58,5 @@ while true; do
     fi
 
     # 内存高时建议缩短检查间隔，比如改为 10 秒
-    sleep 60
+    sleep 300
 done
