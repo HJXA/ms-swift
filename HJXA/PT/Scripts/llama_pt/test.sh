@@ -5,7 +5,7 @@ export NPROC_PER_NODE=4
 export CUDA_VISIBLE_DEVICES=4,5,6,7
 export NCCL_P2P_LEVEL=NVL
 export HF_ENDPOINT=https://hf-mirror.com
-export HF_TOKEN=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
+# export HF_TOKEN=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 # 禁止这样
 
 # 统一设置输出路径
 export OUTPUT_DIR="/ruilab/jxhe/CoE_Monitor/ms-swift/output/test/PT_HJXA_Llama_5M"
@@ -23,7 +23,7 @@ swift pt \
   --swanlab_token WODn49OiskSyv0qBnFZcL \
   --swanlab_project test \
   --save_steps 1000000 \
-  --max_steps 1000000 \
+  --max_steps 50 \
   --lr_scheduler_type warmup_stable_decay \
   --lr_scheduler_kwargs '{"num_decay_steps":0}' \
   --warmup_steps 2000 \

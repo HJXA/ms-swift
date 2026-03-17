@@ -1,8 +1,8 @@
 # 环境变量（不要用 \ 拆）
-export MASTER_PORT=29505
+export MASTER_PORT=29515
 export PATH="/ruilab/jxhe/miniconda3/envs/msswift/bin:$PATH"
 export NPROC_PER_NODE=4
-export CUDA_VISIBLE_DEVICES=0,1,2,3
+export CUDA_VISIBLE_DEVICES=4,5,6,7
 export NCCL_P2P_LEVEL=NVL
 
 # export SWANLAB_RESUME=True
@@ -24,11 +24,11 @@ swift pt \
   --swanlab_token WODn49OiskSyv0qBnFZcL \
   --swanlab_project CoE_PT_Main_HJXA_Llama \
   --save_steps 500 \
-  --max_steps 500000 \
+  --max_steps 150000 \
   --lr_scheduler_type warmup_stable_decay \
   --lr_scheduler_kwargs '{"num_decay_steps":0}' \
   --warmup_steps 2000 \
-  --cached_dataset ./data/fineweb_cached/CC-MAIN-2025-26/train /ruilab/jxhe/CoE_Monitor/data/fineweb_cached/sample-350BT/part1/train /ruilab/jxhe/CoE_Monitor/data/fineweb_cached/sample-350BT/part2/train /ruilab/jxhe/CoE_Monitor/data/fineweb_cached/sample-350BT/part3/train \
+  --cached_dataset ./data/fineweb_cached/CC-MAIN-2025-26/train \
   --load_from_cache_file true \
   --split_dataset_ratio 0 \
   --tuner_type full \

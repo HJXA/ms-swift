@@ -22,7 +22,8 @@ import sys
 sys.path.append("/ruilab/jxhe/CoE_Monitor/utils")
 
 from Layer_Hidden import Layer_Hidden_Train
-from Coe_Scores import CoEScoreInfo_Train as CoEScoreInfo
+# from Coe_Scores import CoEScoreInfo_Train as CoEScoreInfo
+from Coe_Scores_Batch import CoEScoreInfo_Train as CoEScoreInfo_Batch
 
 logger = get_logger()
 
@@ -84,55 +85,57 @@ class CoETrainer(Seq2SeqTrainer_Swift):
                 print(param_stats)
 
 
-            print(f"[CoeTrainer] Rank {self.accelerator.process_index} 初始化完成")
+            
 
             # ========异步保存===========
-    #         self._save_queue = queue.Queue(maxsize=32) 
-    #         def _async_save_worker():
-    #             while True:
-    #                 item = self._save_queue.get()
-    #                 if item is None:
-    #                     break
+            self._save_queue = queue.Queue(maxsize=128) 
+            def _async_save_worker():
+                while True:
+                    item = self._save_queue.get()
+                    if item is None:
+                        break
                     
-    #                 try:
-    #                     task_type = item.get("type")
+                    try:
+                        task_type = item.get("type")
                         
-    #                     if task_type == "tensor":
-    #                         # 处理 Tensor 保存
-    #                         torch.save(item["data"], item["path"])
+                        if task_type == "tensor":
+                            # 处理 Tensor 保存
+                            torch.save(item["data"], item["path"])
                             
-    #                     elif task_type == "coe":
-    #                         # 处理 CoE 保存
-    #                         with open(item["path"], "wb") as f:
-    #                             pickle.dump(item["data"], f)
+                        elif task_type == "coe":
+                            # 处理 CoE 保存
+                            with open(item["path"], "wb") as f:
+                                pickle.dump(item["data"], f)
                                 
-    #                         # 顺便在后台处理文件删除，避免阻塞
-    #                         for rm_path in item.get("remove_paths", []):
-    #                             if os.path.exists(rm_path):
-    #                                 os.remove(rm_path)
-    #                 except Exception as e:
-    #                     print(f"[AsyncWorker] 保存出错: {e}")
-    #                 finally:
-    #                     self._save_queue.task_done()
+                            # 顺便在后台处理文件删除，避免阻塞
+                            for rm_path in item.get("remove_paths", []):
+                                if os.path.exists(rm_path):
+                                    os.remove(rm_path)
+                    except Exception as e:
+                        print(f"[AsyncWorker] 保存出错: {e}")
+                    finally:
+                        self._save_queue.task_done()
 
-    #         self._save_thread = threading.Thread(
-    #             target=_async_save_worker,
-    #             daemon=True
-    #         )
-    #         self._save_thread.start()
+            self._save_thread = threading.Thread(
+                target=_async_save_worker,
+                daemon=True
+            )
+            self._save_thread.start()
 
-    # def _submit_async_layer_save(self, tensor, path):
-    #     """提交 Tensor 保存任务"""
-    #     self._save_queue.put({"type": "tensor", "data": tensor, "path": path})
+            print(f"[CoeTrainer] Rank {self.accelerator.process_index} 初始化完成")
 
-    # def _submit_async_coe_save(self, coe_data, path, remove_paths):
-    #     """提交 CoE 列表保存及旧文件清理任务"""
-    #     self._save_queue.put({
-    #         "type": "coe", 
-    #         "data": coe_data, 
-    #         "path": path, 
-    #         "remove_paths": remove_paths
-    #     })
+    def _submit_async_layer_save(self, tensor, path):
+        """提交 Tensor 保存任务"""
+        self._save_queue.put({"type": "tensor", "data": tensor, "path": path})
+
+    def _submit_async_coe_save(self, coe_data, path, remove_paths):
+        """提交 CoE 列表保存及旧文件清理任务"""
+        self._save_queue.put({
+            "type": "coe", 
+            "data": coe_data, 
+            "path": path, 
+            "remove_paths": remove_paths
+        })
 
 
 
@@ -169,15 +172,21 @@ class CoETrainer(Seq2SeqTrainer_Swift):
 
     @override
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
+        self.step_count += 1
 
 
         if self.test_falg and self.accelerator.is_main_process:
             print("============测试模式=============")
-            self.input = inputs 
+            if self.step_count == 1:
+                self.input = inputs 
+                print("input_ids.shape:", inputs['input_ids'].shape)
+                print("input的labels.shape:", inputs['labels'].shape)
+
+
             torch.cuda.synchronize()
             comput_loss_start = time.time()
 
-        self.step_count += 1
+        
 
         ## MS-Swift 原 compute_loss 代码开始 ##
         labels = None
@@ -288,7 +297,7 @@ class CoETrainer(Seq2SeqTrainer_Swift):
         if self.test_falg and self.accelerator.is_main_process:
             torch.cuda.synchronize()
             print("raw_compute_loss",time.time()-comput_loss_start)
-            coe_start = time.time()
+            layer_hidden_start = time.time()
             print("labels 的形状",labels.shape)
 
             print(f"labels 中 -100 比例",(labels == -100).float().mean())
@@ -302,10 +311,16 @@ class CoETrainer(Seq2SeqTrainer_Swift):
         if current_labels is None:
             print("================\nWarning: current_labels is None.\n================")
 
+        layer_hidden_state = Layer_Hidden_Train(outputs.hidden_states, labels = current_labels,eos_token_id=getattr(self.model.config, 'eos_token_id', None), steps = self.step_count, rank = self.accelerator.process_index, input_ids = inputs.get('input_ids'))
+        # (Batch_Real, Layer, Hidden_Dim)
+        if layer_hidden_state is None:
+            print("================\nError: layer_hidden_state is None. CoE 计算将被跳过。\n================")
+            return (loss, outputs) if return_outputs else loss
 
+        if self.test_falg and self.accelerator.is_main_process:
+            torch.cuda.synchronize()
+            print("layer_hidden_time",time.time()-layer_hidden_start)
 
-
-        layer_hidden_state = Layer_Hidden_Train(outputs.hidden_states, labels = current_labels, steps = self.step_count)
         current_labels = None  # 释放内存
 
         if self.test_falg and self.accelerator.is_main_process:
@@ -322,75 +337,42 @@ class CoETrainer(Seq2SeqTrainer_Swift):
         )
 
         tensor_to_save = (
-            layer_hidden_state
+            layer_hidden_state[:10]
             .detach()
             .to(torch.bfloat16)   # 强烈建议压缩
             .cpu()
         )
+        if step == 1 and rank == 0:
+            print(f"准备保存 Layer Hidden State: {tensor_to_save.shape}, layer_hidden_state 原始形状: {layer_hidden_state.shape}")
 
-        # self._submit_async_layer_save(tensor_to_save, save_path)
+        
 
         if self.test_falg and self.accelerator.is_main_process:
             torch.cuda.synchronize()
             save_layer_start = time.time()
-        torch.save(tensor_to_save, save_path)
+        self._submit_async_layer_save(tensor_to_save, save_path)
+        # torch.save(tensor_to_save, save_path)
         if self.test_falg and self.accelerator.is_main_process:
             torch.cuda.synchronize()
             print("save_layer_time",time.time()-save_layer_start)
         tensor_to_save = None
 
-
-        batch_size = layer_hidden_state.shape[0]
-
-        # total_mag = 0.0
-        total_ang = 0.0
-        total_last_ang = 0.0
-        total_z_a = 0.0
-        total_ang_sum = 0.0
+        if self.test_falg and self.accelerator.is_main_process:
+            torch.cuda.synchronize()
+            coe_start = time.time()
 
 
-        for i in range(batch_size):
-            output_L_coe = CoEScoreInfo(layer_hidden_state[i]) # (Layer,D)
-            
+        # 新
+        z_ang_mean, a_in_mean, a_mid_mean, a_out_mean = CoEScoreInfo_Batch(layer_hidden_state).compute_CoE_Ang()
 
-            # coe_output_M = output_L_coe.compute_CoE_Mag()
-            coe_output_A = output_L_coe.compute_CoE_Ang()
-
-
-            # val_m = coe_output_M[1].detach().cpu().item()
-            val_a = coe_output_A[1].detach().cpu().item()
-            coe_output_z_A = coe_output_A[3].detach().cpu().item()
-            ang_sum = coe_output_A[4].detach().cpu().item()
-
-
-            # total_mag += val_m
-            total_ang += val_a
-            total_z_a += coe_output_z_A
-            total_ang_sum += ang_sum
-
-
-            coe_last_ang = output_L_coe.compute_Last_Ang()
-            val_last_ang = coe_last_ang.detach().cpu().item()
-            total_last_ang += val_last_ang
-
-        output_L_coe = None  # 释放内存
-
-        # avg_mag = total_mag / batch_size
-        avg_ang = total_ang / batch_size
-        avg_last_ang = total_last_ang / batch_size
-        avg_z_a = total_z_a / batch_size
-        avg_ang_sum = total_ang_sum / batch_size
-
-           
 
         metrics = {
-            # "CoE/Avg_Mag": avg_mag,
-            "CoE/Ang": avg_ang,
-            "CoE/Z_A": avg_z_a,
-            "CoE/Last_Ang": avg_last_ang,
-            "CoE/Ang_Sum": avg_ang_sum
+            "CoE/Z_A_Mean": z_ang_mean,
+            "CoE/A_In_Mean": a_in_mean,
+            "CoE/A_Mid_Mean": a_mid_mean,
+            "CoE/A_Out_Mean": a_out_mean
         }
-        
+
         if rank == 0:
             args = self.args
             if 'swanlab' in args.report_to:
@@ -443,6 +425,43 @@ class CoETrainer(Seq2SeqTrainer_Swift):
             print("step_time=",time.time()-step_start)
 
         return loss
+
+    
+    # def prediction_step(
+    #     self,
+    #     model: nn.Module,
+    #     inputs: Dict[str, Union[torch.Tensor, Any]],
+    #     prediction_loss_only: bool,
+    #     ignore_keys: Optional[List[str]] = None,
+    #     **gen_kwargs,
+    # ) -> Tuple[Optional[float], Optional[torch.Tensor], Optional[torch.Tensor]]:
+    #     if not self.args.predict_with_generate or prediction_loss_only:
+    #         with self.template.forward_context(self.model, inputs):
+    #             return super().prediction_step(
+    #                 model, inputs, prediction_loss_only=prediction_loss_only, ignore_keys=ignore_keys)
+    #     data_list = inputs['_data']
+    #     labels_list = [InferRequest.remove_response(data['messages']) for data in data_list]
+    #     with unwrap_model_for_generation(
+    #             self.model_wrapped, self.accelerator,
+    #             gather_deepspeed3_params=self.args.ds3_gather_for_generation), self.template.generate_context():
+    #         resp_list = self.infer_engine.infer(
+    #             data_list,
+    #             RequestConfig(max_tokens=self.model.generation_config.max_new_tokens),
+    #             use_tqdm=False,
+    #         )
+
+    #     response_list = []
+    #     jsonl_cache = []
+    #     device = self.args.device
+    #     for data, resp, labels in zip(data_list, resp_list, labels_list):
+    #         response = resp.choices[0].message.content
+    #         jsonl_cache.append({'response': response, 'labels': labels, **data})
+    #         response_list.append(Serializer.to_tensor(resp.choices[0].message.content).to(device=device))
+    #     self.jsonl_writer.append(jsonl_cache, gather_obj=True)
+    #     labels_list = [Serializer.to_tensor(labels).to(device=device) for labels in labels_list]
+    #     response_list = pad_sequence(response_list, batch_first=True, padding_value=0)
+    #     labels_list = pad_sequence(labels_list, batch_first=True, padding_value=0)
+    #     return None, response_list, labels_list
 
 
         
