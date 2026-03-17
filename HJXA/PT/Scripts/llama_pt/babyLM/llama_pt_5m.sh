@@ -11,40 +11,40 @@ export NCCL_P2P_LEVEL=NVL
 # 正常lr=1e-3
 
 # 统一设置输出路径
-export OUTPUT_DIR="/ruilab/jxhe/CoE_Monitor/ms-swift/output/PT_HJXA_Llama_5M_low_lr"
+export OUTPUT_DIR="/ruilab/jxhe/CoE_Monitor/ms-swift/output/PT_HJXA_Llama_5M_3_15_no_packing_no_padding_free"
 # 确保目录存在
 mkdir -p $OUTPUT_DIR
 # 启动训练
 swift pt \
   --model /ruilab/jxhe/CoE_Monitor/checkpoints/coe_pt_init_models/Llama_5M \
-  --packing true \
+  --packing false \
   --packing_num_proc 32 \
-  --padding_free true \
+  --padding_free false \
   --report_to swanlab \
   --truncation_strategy right \
   --swanlab_token WODn49OiskSyv0qBnFZcL \
   --swanlab_project CoE_PT_Main_HJXA_Llama \
   --save_steps 500 \
-  --max_steps 500000 \
+  --max_steps 150000 \
   --lr_scheduler_type warmup_stable_decay \
   --lr_scheduler_kwargs '{"num_decay_steps":0}' \
   --warmup_steps 2000 \
-  --cached_dataset ./data/fineweb_cached/CC-MAIN-2025-26/train /ruilab/jxhe/CoE_Monitor/data/fineweb_cached/sample-350BT/part1/train /ruilab/jxhe/CoE_Monitor/data/fineweb_cached/sample-350BT/part2/train /ruilab/jxhe/CoE_Monitor/data/fineweb_cached/sample-350BT/part3/train \
+  --cached_dataset ./data/fineweb_cached/CC-MAIN-2025-26/train \
   --load_from_cache_file true \
   --split_dataset_ratio 0 \
   --tuner_type full \
   --torch_dtype bfloat16 \
   --per_device_train_batch_size 128 \
   --attn_impl flash_attention_2 \
-  --learning_rate 1e-4 \
+  --learning_rate 1e-3 \
   --gradient_checkpointing true \
   --gradient_accumulation_steps 1 \
   --weight_decay 0.0 \
   --logging_steps 1 \
   --max_length 2048 \
   --output_dir $OUTPUT_DIR \
-  --dataset_num_proc 4 \
-  --dataloader_num_workers 4 \
+  --dataset_num_proc 16 \
+  --dataloader_num_workers 16 \
   --deepspeed zero2 \
   --save_only_model false \
   --dataset_shuffle false \

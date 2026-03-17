@@ -44,9 +44,10 @@ class FineWeb_Loader(DatasetLoader):
         # 1. 定义子集名称到相对路径的映射字典
         subset_map = {
             # "CC-MAIN-2025-26": "data/CC-MAIN-2025-26",
-            "sample-350BT-part1": "sample/350BT/part1",
-            "sample-350BT-part2": "sample/350BT/part2",
-            "sample-350BT-part3": "sample/350BT/part3",
+            # "sample-350BT-part1": "sample/350BT/part1",
+            # "sample-350BT-part2": "sample/350BT/part2",
+            # "sample-350BT-part3": "sample/350BT/part3",
+            "sample-100BT": "sample/100BT",
 
         }
         # 默认加载全部子集
@@ -101,13 +102,14 @@ class FineWeb_Loader(DatasetLoader):
 
 register_dataset(
     DatasetMeta(
-        dataset_path="/ruilab/jxhe/CoE_Monitor/data/fineweb",
+        dataset_path="/ruilab/jxhe/CoE_Monitor/data/fineweb_edu",
         dataset_name="local_fineweb",
         subsets=[
             # SubsetDataset("CC-MAIN-2025-26", split=["train"]),
-            SubsetDataset("sample-350BT-part1", split=["train"]),
-            SubsetDataset("sample-350BT-part2", split=["train"]),
-            SubsetDataset("sample-350BT-part3", split=["train"]),
+            # SubsetDataset("sample-350BT-part1", split=["train"]),
+            # SubsetDataset("sample-350BT-part2", split=["train"]),
+            # SubsetDataset("sample-350BT-part3", split=["train"]),
+            SubsetDataset("sample-100BT", split=["train"]),
         ],
         loader=FineWeb_Loader,
         huge_dataset=True,
