@@ -181,6 +181,8 @@ class CoETrainer(Seq2SeqTrainer_Swift):
                 self.input = inputs 
                 print("input_ids.shape:", inputs['input_ids'].shape)
                 print("input的labels.shape:", inputs['labels'].shape)
+                print("input_ids:", inputs['input_ids'].tolist())
+                print("labels:", inputs['labels'].tolist())
 
 
             torch.cuda.synchronize()
@@ -311,7 +313,7 @@ class CoETrainer(Seq2SeqTrainer_Swift):
         if current_labels is None:
             print("================\nWarning: current_labels is None.\n================")
 
-        layer_hidden_state = Layer_Hidden_Train(outputs.hidden_states, labels = current_labels,eos_token_id=getattr(self.model.config, 'eos_token_id', None), steps = self.step_count, rank = self.accelerator.process_index, input_ids = inputs.get('input_ids'))
+        layer_hidden_state = Layer_Hidden_Train(outputs.hidden_states, labels = current_labels,eos_token_id=getattr(self.model.config, 'eos_token_id', None),pad_token_id=getattr(self.model.config, 'pad_token_id', None), steps = self.step_count, rank = self.accelerator.process_index, input_ids = inputs.get('input_ids'))
         # (Batch_Real, Layer, Hidden_Dim)
         if layer_hidden_state is None:
             print("================\nError: layer_hidden_state is None. CoE 计算将被跳过。\n================")
@@ -363,7 +365,7 @@ class CoETrainer(Seq2SeqTrainer_Swift):
 
 
         # 新
-        z_ang_mean, a_in_mean, a_mid_mean, a_out_mean = CoEScoreInfo_Batch(layer_hidden_state).compute_CoE_Ang()
+        z_ang_mean, a_in_mean, a_mid_mean, a_out_mean = CoEScoreInfo_Batch(layer_hidden_state).compute_CoE()
 
 
         metrics = {
