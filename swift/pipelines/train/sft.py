@@ -179,8 +179,9 @@ class SwiftSft(SwiftPipeline, TunerMixin):
         args.save_args()
 
         for i,x in enumerate(train_dataset):
-            if i== 1:
+            if i== 2:
                 break
+            print("show {} samples of the train dataset:".format(i+1))
             print(x)
 
 
@@ -357,3 +358,44 @@ class SwiftSft(SwiftPipeline, TunerMixin):
 
 def sft_main(args: Optional[Union[List[str], SftArguments]] = None):
     return SwiftSft(args).main()
+
+
+
+
+class HJXA_Raw_Train_Pipeline(SwiftSft):
+
+    @RayHelper.function(group='default')
+    def run(self):
+        args = self.args
+        train_dataset, val_dataset = self._prepare_dataset() # 返回一个train_dataset即可 Datasets 类, 因为暂时不会有验证集的事
+
+        if args.task_type == 'seq_cls': # 分类问题
+            args.problem_type = args.problem_type or getattr(self.model.config, 'problem_type', None)
+            logger.info(f'args.problem_type: {args.problem_type}')
+        args.save_args()
+
+        for i,x in enumerate(train_dataset):
+            if i== 1:
+                break
+            print("show one sample of the train dataset:")
+            print(x) 
+            # {'input_ids': [41, 14, 281, 4781, 3207, 374, 363, 3, 2], 'labels': [-100, 14, 281, 4781, 3207, 374, 363, 3, 2], 'length': 9, 'lengths': [9]} -- PT
+
+        # Some tuners require train_dataset and data_collator for preparation: LoRA-GA
+        self.model = self.prepare_model(self.args, self.model, template=self.template, train_dataset=train_dataset) # full下不需要传入train_dataset和template
+        logger.info(f'model: {self.model}')
+        model_parameter_info = get_model_parameter_info(self.model)
+        self.train_msg['model_parameter_info'] = model_parameter_info
+        logger.info(f'model_parameter_info: {model_parameter_info}')
+
+        trainer_cls = TrainerFactory.get_trainer_cls(args)
+        trainer = trainer_cls(
+            model=self.model,
+            args=self.args.training_args,
+            template=self.template,
+            train_dataset=train_dataset,
+            eval_dataset=val_dataset,
+            **self._get_trainer_kwargs(),
+        )
+        return self.train(trainer)
+

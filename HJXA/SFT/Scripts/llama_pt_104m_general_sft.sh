@@ -4,7 +4,7 @@ set -e
 ############################################
 # 环境变量
 ############################################
-export MASTER_PORT=29401
+export MASTER_PORT=20434
 export PATH="/ruilab/jxhe/miniconda3/envs/msswift/bin:$PATH"
 export NPROC_PER_NODE=1
 export CUDA_VISIBLE_DEVICES=4
@@ -14,12 +14,12 @@ export HF_ENDPOINT=https://hf-mirror.com
 ############################################
 # 路径配置
 ############################################
-MODEL_ROOT=""
+MODEL_ROOT="/ruilab/jxhe/CoE_Monitor/checkpoints/pt_models/PT_HJXA_Llama_104M_Minimind/little_sets"
 
-OUTPUT_BASE_DIR="/ruilab/jxhe/CoE_Monitor/ms-swift/output/SFT/test"
-LOG_DIR="/ruilab/jxhe/CoE_Monitor/ms-swift/logs"
-
-DATASET="/ruilab/jxhe/CoE_Monitor/data/LLM/SFT/Dolci-Instruct-SFT-Llama_template_cached_max_length_2048/train#10000"
+OUTPUT_BASE_DIR="/ruilab/jxhe/CoE_Monitor/ms-swift/output/SFT/General_PT_HJXA_Llama_104M_Minimind"
+LOG_DIR="/ruilab/jxhe/CoE_Monitor/ms-swift/logs/SFT/General_PT_HJXA_Llama_104M_Minimind"
+swanlab_name=$(basename "${OUTPUT_BASE_DIR%/}")
+DATASET="/ruilab/jxhe/CoE_Monitor/data/LLM/SFT/Dolci-Instruct-SFT-Llama_template_cached_max_length_2048/train#640000"
 
 mkdir -p "$OUTPUT_BASE_DIR"
 mkdir -p "$LOG_DIR"
@@ -58,19 +58,18 @@ swift sft \
   --report_to swanlab \
   --truncation_strategy right \
   --swanlab_token WODn49OiskSyv0qBnFZcL \
-  --swanlab_project test \
+  --swanlab_project $swanlab_name \
   --save_steps 10000 \
-  --max_steps 100000 \
-  --lr_scheduler_type warmup_stable_decay \
-  --lr_scheduler_kwargs '{"num_decay_steps":0}' \
-  --warmup_steps 5000 \
+  --max_steps 10000 \
+  --lr_scheduler_type cosine \
+  --warmup_steps 2000 \
   --cached_dataset "$DATASET" \
   --use_hf true \
   --load_from_cache_file true \
   --split_dataset_ratio 0 \
   --tuner_type full \
   --torch_dtype bfloat16 \
-  --per_device_train_batch_size 128 \
+  --per_device_train_batch_size 32 \
   --attn_impl flash_attention_2 \
   --learning_rate 1e-5 \
   --gradient_checkpointing true \
@@ -81,7 +80,7 @@ swift sft \
   --dataset_num_proc 4 \
   --dataloader_num_workers 4 \
   --deepspeed zero2 \
-  --save_only_model false \
+  --save_only_model true \
   --dataset_shuffle true \
   --train_dataloader_shuffle true \
   --use_liger_kernel true \

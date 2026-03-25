@@ -58,7 +58,7 @@ training_args = Seq2SeqTrainingArguments(
 output_dir = os.path.abspath(os.path.expanduser(output_dir))
 logger.info(f'output_dir: {output_dir}')
 
-model, tokenizer = get_model_tokenizer(model_id_or_path)
+model, tokenizer = get_model_processor(model_id_or_path)
 logger.info(f'model_info: {model.model_info}')
 template = get_template(model.model_meta.template, tokenizer, default_system=system, max_length=max_length)
 template.set_mode('train')
@@ -105,3 +105,49 @@ logger.info(f'last_model_checkpoint: {last_model_checkpoint}')
 images_dir = os.path.join(output_dir, 'images')
 logger.info(f'images_dir: {images_dir}')
 plot_images(images_dir, training_args.logging_dir, ['train/loss'], 0.9)  # 保存图片
+
+
+
+import os
+import sys
+
+from swift import SftArguments, sft_main
+
+sys.path.append('examples/custom/my_qwen2_5_omni')
+
+if __name__ == '__main__':
+    import my_register
+    os.environ['MAX_PIXELS'] = '1003520'
+    sft_main(
+        SftArguments(
+            model='Qwen/Qwen2.5-Omni-7B',
+            dataset=['AI-ModelScope/LaTeX_OCR#5000'],
+            model_type='my_qwen2_5_omni',
+            template='my_qwen2_5_omni',
+            load_from_cache_file=True,
+            split_dataset_ratio=0.01,
+            tuner_type='lora',
+            torch_dtype='bfloat16',
+            attn_impl='flash_attn',
+            padding_free=True,
+            num_train_epochs=1,
+            per_device_train_batch_size=16,
+            per_device_eval_batch_size=16,
+            learning_rate=1e-4,
+            lora_rank=8,
+            lora_alpha=32,
+            target_modules=['all-linear'],
+            freeze_vit=True,
+            freeze_aligner=True,
+            gradient_accumulation_steps=1,
+            eval_steps=50,
+            save_steps=50,
+            save_total_limit=2,
+            logging_steps=5,
+            max_length=2048,
+            output_dir='output',
+            warmup_ratio=0.05,
+            dataloader_num_workers=4,
+            dataset_num_proc=1,
+        ))
+

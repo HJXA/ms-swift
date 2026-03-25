@@ -1,29 +1,32 @@
 # 环境变量（不要用 \ 拆）
 export MASTER_PORT=29401
-export PATH="/ruilab/jxhe/miniconda3/envs/msswift/bin:$PATH"
-export NPROC_PER_NODE=4
-export CUDA_VISIBLE_DEVICES=4,5,6,7
+# export TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD=true
+
+export PATH="/ruilab/jxhe/miniconda3/envs/swift/bin:$PATH"
+export NPROC_PER_NODE=1
+export CUDA_VISIBLE_DEVICES=0
+
 export NCCL_P2P_LEVEL=NVL
+
 export HF_ENDPOINT=https://hf-mirror.com
-# export HF_TOKEN=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 # 禁止这样
 
 # 统一设置输出路径
 export OUTPUT_DIR="/ruilab/jxhe/CoE_Monitor/ms-swift/output/test/PT_HJXA_Llama_5M"
-#   
+# --resume_from_checkpoint /ruilab/jxhe/CoE_Monitor/ms-swift/output/PT_HJXA_Llama_5M/v0-20260315-153950/checkpoint-90000 \
 # 确保目录存在
 mkdir -p $OUTPUT_DIR
 # 启动训练
 swift pt \
-  --model /ruilab/jxhe/CoE_Monitor/checkpoints/coe_pt_init_models/Llama_minimind_104M \
-  --packing true \
+  --model /ruilab/jxhe/CoE_Monitor/checkpoints/coe_pt_init_models/Llama_5M \
+  --packing false \
   --packing_num_proc 32 \
-  --padding_free true \
+  --padding_free false \
   --report_to swanlab \
   --truncation_strategy right \
   --swanlab_token WODn49OiskSyv0qBnFZcL \
   --swanlab_project test \
   --save_steps 1000000 \
-  --max_steps 50 \
+  --max_steps 5 \
   --lr_scheduler_type warmup_stable_decay \
   --lr_scheduler_kwargs '{"num_decay_steps":0}' \
   --warmup_steps 2000 \
@@ -33,14 +36,14 @@ swift pt \
   --split_dataset_ratio 0 \
   --tuner_type full \
   --torch_dtype bfloat16 \
-  --per_device_train_batch_size 128 \
+  --per_device_train_batch_size 4 \
   --attn_impl flash_attention_2 \
   --learning_rate 1e-3 \
   --gradient_checkpointing true \
   --ddp_find_unused_parameters true \
   --weight_decay 0.0 \
   --logging_steps 1 \
-  --max_length 2048 \
+  --max_length 64 \
   --output_dir $OUTPUT_DIR \
   --dataset_num_proc 4 \
   --dataloader_num_workers 4 \

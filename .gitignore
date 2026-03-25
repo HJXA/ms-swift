@@ -8,6 +8,7 @@ test.py
 coe_train_result
 # C extensions
 *.so
+logs
 
 # Distribution / packaging
 .Python

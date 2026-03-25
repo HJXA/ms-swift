@@ -1,25 +1,29 @@
 # 环境变量（不要用 \ 拆）
 export MASTER_PORT=29505
-export PATH="/ruilab/jxhe/miniconda3/envs/msswift/bin:$PATH"
 export NPROC_PER_NODE=4
 export CUDA_VISIBLE_DEVICES=4,5,6,7
 export NCCL_P2P_LEVEL=NVL
 
-# export SWANLAB_RESUME=True
-# export SWANLAB_RUN_ID=<exp_id>
+export TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD=true
+echo $TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD
+export PATH="/ruilab/jxhe/miniconda3/envs/swift/bin:$PATH"
+
+export SWANLAB_RESUME=True
+export SWANLAB_RUN_ID=h9h1nr8myfxwq2hnbff1d
 
 # 正常lr=1e-3
 
 # 统一设置输出路径
-export OUTPUT_DIR="/ruilab/jxhe/CoE_Monitor/ms-swift/output/PT_HJXA_Llama_5M_3_15_no_packing_no_padding_free"
+export OUTPUT_DIR="/ruilab/jxhe/CoE_Monitor/ms-swift/output/PT_HJXA_Llama_5M"
 # 确保目录存在
 mkdir -p $OUTPUT_DIR
 # 启动训练
 swift pt \
   --model /ruilab/jxhe/CoE_Monitor/checkpoints/coe_pt_init_models/Llama_5M \
-  --packing false \
+  --resume_from_checkpoint /ruilab/jxhe/CoE_Monitor/ms-swift/output/PT_HJXA_Llama_5M/v0-20260315-153950/checkpoint-90000 \
+  --packing true \
   --packing_num_proc 32 \
-  --padding_free false \
+  --padding_free true \
   --report_to swanlab \
   --truncation_strategy right \
   --swanlab_token WODn49OiskSyv0qBnFZcL \
@@ -50,7 +54,7 @@ swift pt \
   --dataset_shuffle false \
   --train_dataloader_shuffle false \
   --use_liger_kernel true \
-  2>&1 | tee $OUTPUT_DIR/train.log
+  2>&1 | tee $OUTPUT_DIR/train_2.log
 
 #   --dataset local_fineweb \
 #   --columns '{"text":"content"}' \
