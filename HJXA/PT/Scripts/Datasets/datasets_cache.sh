@@ -1,14 +1,14 @@
 export HF_ENDPOINT=https://hf-mirror.com
 # ================================PT数据集缓存脚本示例===============================
 swift export \
-    --model /ruilab/jxhe/CoE_Monitor/checkpoints/coe_pt_init_models/Llama_25M \
-    --dataset local_fineweb:sample-100BT \
+    --model /ruilab/jxhe/CoE_Monitor/checkpoints/pythia_14m \
+    --dataset /ruilab/jxhe/CoE_Monitor/data/LLM/PT/pile_tmp.parquet \
     --dataset_num_proc 24 \
     --to_cached_dataset true \
     --use_chat_template false \
     --truncation_strategy right \
     --loss_scale all \
-    --output_dir ./data/fineweb_edu_cached/sample-100BT
+    --output_dir ./data/pile_deduplicated_cached/
 
 
 # ===============================SFT数据集缓存脚本示例===============================

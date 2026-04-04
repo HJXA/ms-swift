@@ -430,13 +430,33 @@ class HFHub(HubOperation):
             revision = 'main'
         return load_dataset(
             dataset_id,
+            # "pile_deduplicated",
             name=subset_name,
             split=split,
             streaming=streaming,
             revision=revision,
             download_mode=download_mode,
+            # cache_dir="/ruilab/jxhe/.cache/huggingface/datasets",
             num_proc=num_proc,
             trust_remote_code=True)
+    
+
+        # 删除原文件只有缓存时使用
+
+        # /ruilab/jxhe/.cache/huggingface/datasets/pile_deduplicated/default/0.0.0/384d28c0d1196966
+
+        # return load_dataset(
+        #     # dataset_id, # 注释这个
+        #     "pile_deduplicated", # 补充这个名字
+        #     name=subset_name,
+        #     split=split,
+        #     streaming=streaming,
+        #     revision=revision,
+        #     download_mode=download_mode,
+        #     cache_dir="/ruilab/jxhe/.cache/huggingface/datasets", #设置cache
+        #     num_proc=num_proc,
+        #     trust_remote_code=True)
+
 
     @classmethod
     def download_model(cls,

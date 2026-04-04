@@ -3,7 +3,7 @@ import numpy as np
 import os
 from contextlib import nullcontext
 from datasets import Dataset as HfDataset
-from datasets import load_dataset as hf_load_dataset
+from datasets import load_dataset as hf_load_dataset, load_from_disk as hf_load_from_disk
 from functools import partial
 from modelscope.hub.utils.utils import get_cache_dir
 from typing import Dict, List, Literal, Optional, Tuple, Union
@@ -155,6 +155,16 @@ class DatasetLoader(BaseDatasetLoader):
         *,
         use_hf: Optional[bool] = None,
     ) -> HfDataset:
+        
+        # 保存后直接用
+        # dataset = hf_load_dataset(
+        #     "parquet", 
+        #     data_files="/ruilab/jxhe/CoE_Monitor/data/LLM/PT/pile_tmp.parquet",
+        #     split='train'
+        # )
+        # print(dataset)
+        # return dataset
+
         if dataset_syntax.dataset_type == 'path':
             dataset = self._load_dataset_path(
                 dataset_syntax.dataset,
@@ -173,6 +183,12 @@ class DatasetLoader(BaseDatasetLoader):
                 )
                 datasets.append(dataset)
             dataset = self.concat_datasets(datasets)
+
+        # 无存储的笨办法
+        # dataset.to_parquet(
+        #     "/ruilab/jxhe/CoE_Monitor/data/LLM/PT/pile_tmp.parquet",
+        # )
+        # raise "新的小数据集已经保存到 /ruilab/jxhe/CoE_Monitor/data/LLM/PT/pile_tmp.parquet。后续需要tokenizer"
         return dataset
 
 
