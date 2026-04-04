@@ -17,13 +17,22 @@ import threading
 import queue
 import re
 import time
+from pathlib import Path
 
-import sys
-sys.path.append("/ruilab/jxhe/CoE_Monitor/utils")
 
-from Layer_Hidden import Layer_Hidden_Train
-# from Coe_Scores import CoEScoreInfo_Train as CoEScoreInfo
-from Coe_Scores_Batch import CoEScoreInfo_Train as CoEScoreInfo_Batch
+try:
+    from utils.Layer_Hidden import Layer_Hidden_Train
+    from utils.Coe_Scores_Batch import CoEScoreInfo_Train as CoEScoreInfo_Batch
+except ModuleNotFoundError:
+    import sys
+
+    project_root = '/ruilab/jxhe/CoE_Monitor/utils'
+    if str(project_root) not in sys.path:
+        sys.path.insert(0, str(project_root))
+
+    from Layer_Hidden import Layer_Hidden_Train
+    from Coe_Scores_Batch import CoEScoreInfo_Train as CoEScoreInfo_Batch
+
 
 logger = get_logger()
 
@@ -429,41 +438,6 @@ class CoETrainer(Seq2SeqTrainer_Swift):
         return loss
 
     
-    # def prediction_step(
-    #     self,
-    #     model: nn.Module,
-    #     inputs: Dict[str, Union[torch.Tensor, Any]],
-    #     prediction_loss_only: bool,
-    #     ignore_keys: Optional[List[str]] = None,
-    #     **gen_kwargs,
-    # ) -> Tuple[Optional[float], Optional[torch.Tensor], Optional[torch.Tensor]]:
-    #     if not self.args.predict_with_generate or prediction_loss_only:
-    #         with self.template.forward_context(self.model, inputs):
-    #             return super().prediction_step(
-    #                 model, inputs, prediction_loss_only=prediction_loss_only, ignore_keys=ignore_keys)
-    #     data_list = inputs['_data']
-    #     labels_list = [InferRequest.remove_response(data['messages']) for data in data_list]
-    #     with unwrap_model_for_generation(
-    #             self.model_wrapped, self.accelerator,
-    #             gather_deepspeed3_params=self.args.ds3_gather_for_generation), self.template.generate_context():
-    #         resp_list = self.infer_engine.infer(
-    #             data_list,
-    #             RequestConfig(max_tokens=self.model.generation_config.max_new_tokens),
-    #             use_tqdm=False,
-    #         )
-
-    #     response_list = []
-    #     jsonl_cache = []
-    #     device = self.args.device
-    #     for data, resp, labels in zip(data_list, resp_list, labels_list):
-    #         response = resp.choices[0].message.content
-    #         jsonl_cache.append({'response': response, 'labels': labels, **data})
-    #         response_list.append(Serializer.to_tensor(resp.choices[0].message.content).to(device=device))
-    #     self.jsonl_writer.append(jsonl_cache, gather_obj=True)
-    #     labels_list = [Serializer.to_tensor(labels).to(device=device) for labels in labels_list]
-    #     response_list = pad_sequence(response_list, batch_first=True, padding_value=0)
-    #     labels_list = pad_sequence(labels_list, batch_first=True, padding_value=0)
-    #     return None, response_list, labels_list
 
 
         
