@@ -109,6 +109,39 @@ logger = get_logger()
 #     exist_ok=True)
 
 
+class PythiaLoader(ModelLoader):
+
+    def get_config(self, model_dir: str) -> PretrainedConfig:
+        return AutoConfig.from_pretrained(model_dir)
+
+    def get_processor(self, model_dir: str, config: PretrainedConfig):
+        return AutoTokenizer.from_pretrained(model_dir, trust_remote_code=True)
+
+    def get_model(self, model_dir: str, config: PretrainedConfig, processor,
+                  model_kwargs):
+        return AutoModelForCausalLM.from_pretrained(
+            model_dir, config=config, torch_dtype=self.torch_dtype, **model_kwargs)
+
+
+register_model(
+    ModelMeta(
+        model_type='gpt_neox',
+        model_groups=[
+            ModelGroup([
+                        Model('HJXA/Pythia_14M', 'HJXA/Pythia_14M'),
+                        # Model('HJXA/HJXA_Qwen2_1B', 'HJXA/HJXA_Qwen2_1B'),
+                        # Model('HJXA/HJXA_Qwen2_25M', 'HJXA/HJXA_Qwen2_25M'),
+                        # Model('HJXA/HJXA_Qwen2_55M', 'HJXA/HJXA_Qwen2_55M'),
+                        # Model('HJXA/HJXA_Qwen2_104M', 'HJXA/HJXA_Qwen2_104M'),
+                    ])
+        ],
+        template='default',
+        loader = PythiaLoader,
+        is_multimodal=False,
+    ),
+    exist_ok=False)
+
+
 
 
 # ============================ 本人新增=====================
