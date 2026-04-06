@@ -3,15 +3,14 @@ export MASTER_PORT=29501
 export PATH="/ruilab/jxhe/miniconda3/envs/msswift/bin:$PATH"
 export NPROC_PER_NODE=4
 export CUDA_VISIBLE_DEVICES=4,5,6,7
-export NCCL_P2P_LEVEL=NVL
+# export NCCL_DEBUG=INFO
+# export NCCL_P2P_LEVEL=NVL
 
 # export SWANLAB_RESUME=True
 # export SWANLAB_RUN_ID=<exp_id>
 
-#   --max_steps 143000 \
-
 # 统一设置输出路径
-export OUTPUT_DIR="/ruilab/jxhe/CoE_Monitor/ms-swift/output/PT_Pythia_14M"
+export OUTPUT_DIR="/ruilab/jxhe/CoE_Monitor/ms-swift/output/test/PT_Pythia_14M"
 # 确保目录存在
 mkdir -p $OUTPUT_DIR
 # 启动训练
@@ -23,12 +22,12 @@ swift pt \
   --report_to swanlab \
   --truncation_strategy right \
   --swanlab_token WODn49OiskSyv0qBnFZcL \
-  --swanlab_project CoE_PT_Main_Pythia \
-  --save_steps 2000 \
-  --max_steps 48000 \
+  --swanlab_project test \
+  --save_steps 200 \
+  --max_steps 40 \
   --lr_scheduler_type cosine \
   --warmup_steps 1430 \
-  --cached_dataset /ruilab2/jxhe/data/pile_deduplicated_cached/train \
+  --cached_dataset /ruilab/jxhe/CoE_Monitor/data/LLM/PT/c4-subsets_cached/train \
   --load_from_cache_file true \
   --split_dataset_ratio 0 \
   --tuner_type full \

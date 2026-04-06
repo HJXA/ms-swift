@@ -50,11 +50,26 @@ class CoETrainer(Seq2SeqTrainer_Swift):
         self.step_count = 0 
 
 
-        
+        self.rank = self.accelerator.process_index if hasattr(self, 'accelerator') else 0
 
         self.input = None
         self.output = None
         self.test_falg = test_falg
+
+        # ====== test_falg 诊断计数器 ======
+        # eval 轮次编号（从 1 开始计数）。
+        self.eval_round = 0
+        # 当前 eval 轮次内已执行的步数。
+        self.per_eval_steps = 0
+        # 记录上一次 compute_loss 看到的模型模式，便于识别 train/eval 切换边界。
+        self._last_model_training_flag: Optional[bool] = None
+
+        # 梯度累加诊断：micro-step 总次数。
+        self._test_micro_step_total = 0
+        # 梯度累加诊断：进入“真实更新步逻辑”的次数。
+        self._test_update_step_total = 0
+        # 梯度累加诊断：因非最后累加步而跳过自定义逻辑的次数。
+        self._test_skipped_accum_forward_total = 0
 
         if CoE_Flag:
 
@@ -93,8 +108,6 @@ class CoETrainer(Seq2SeqTrainer_Swift):
 
                 print(param_stats)
 
-
-            
 
             # ========异步保存===========
             self._save_queue = queue.Queue(maxsize=128) 
@@ -178,11 +191,125 @@ class CoETrainer(Seq2SeqTrainer_Swift):
         print(f"[CoeTrainer] Rank {rank}: 步数已设置为 {max_step}")
         
 
+    def _is_eval_steps(self, model: nn.Module) -> bool:
+        # 评估/验证阶段 prediction_step 会调用 compute_loss，此时直接复用父类逻辑。
+        is_training = bool(getattr(model, "training", False))
+
+        if self.test_falg:
+            # 首次调用只记录状态，不触发“切换边界”逻辑。
+            if self._last_model_training_flag is None:
+                self._last_model_training_flag = is_training
+                if not is_training:
+                    self.eval_round = 1
+                    self.per_eval_steps = 0
+                    if self.rank == 0:
+                        print(f"[评估测试] 首次进入第 {self.eval_round} 轮评估，轮内步数(per_eval_steps)已重置为 0")
+            else:
+                # train -> eval：新一轮 eval 开始，步数清零并轮次 +1。
+                if self._last_model_training_flag and (not is_training):
+                    self.eval_round += 1
+                    self.per_eval_steps = 0
+                    if self.rank == 0:
+                        print(f"[评估测试] 进入第 {self.eval_round} 轮评估，轮内步数(per_eval_steps)已重置为 0")
+
+                # eval -> train：上一轮 eval 结束，打印总结并清零轮内步数。
+                elif (not self._last_model_training_flag) and is_training:
+                    if self.rank == 0:
+                        print(f"[评估测试] 第 {self.eval_round} 轮评估结束，本轮步数(per_eval_steps)={self.per_eval_steps}，现重置为 0")
+                    self.per_eval_steps = 0
+
+            # 仅在 eval 模式内累计本轮步数。
+            if not is_training:
+                self.per_eval_steps += 1
+
+            # 更新“上一次模式”记录。
+            self._last_model_training_flag = is_training
+
+            # 只在主进程打印，避免多卡重复日志。
+            if self.rank == 0:
+                if is_training:
+                    print(
+                        f"[Eval测试]: 全局更新步(step_count)={self.step_count}，当前模型状态=训练，"
+                        f"是否依据eval来跳过自定义loss计算={not is_training}"
+                    )
+                else:
+                    print(
+                        f"[Eval测试]: 全局更新步(step_count)={self.step_count}，当前模型状态=评估/验证，"
+                        f"评估轮数(eval_round)={self.eval_round}，该轮步数(per_eval_steps)={self.per_eval_steps}，"
+                        f"是否依据eval来跳过自定义loss计算={not is_training}"
+                    )
+
+        return not is_training
+    
 
     @override
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
+        if self._is_eval_steps(model):
+            return super().compute_loss(
+                model,
+                inputs,
+                return_outputs=return_outputs,
+                num_items_in_batch=num_items_in_batch,
+            )
+        
+        # 复制 inputs 以防止原始字典中的 labels 被弹出
+        # inputs_for_loss = inputs.copy()
+        # labels = inputs.get("labels")
+
+        grad_acc_steps = max(1, int(getattr(self.args, "gradient_accumulation_steps", 1) or 1))
+        is_last_accum_forward = True
+        if model.training and grad_acc_steps > 1:
+            # accelerate 会在真正需要梯度同步/更新的 micro-step 上将 sync_gradients 设为 True。
+            # 这样也能正确覆盖 epoch 尾部不足 grad_acc_steps 的最后一个 micro-step。
+            is_last_accum_forward = bool(getattr(self.accelerator, "sync_gradients", True))
+
+        if self.test_falg and self.rank == 0:
+            self._test_micro_step_total += 1
+            current_global_step = int(getattr(self.state, "global_step", 0))
+            print("="*10,"当前步总体统计","="*10)
+            print(
+                f"[梯度累加测试][compute_loss] 微步统计: "
+                f"累计前向次数(micro_step_total)={self._test_micro_step_total}, "
+                f"梯度累加配置(grad_acc_steps)={grad_acc_steps}, "
+                f"是否为最后累加前向(is_last_accum_forward)={is_last_accum_forward}, "
+                f"更新前全局步(global_step_before)={current_global_step}, "
+                f"更新前自定义步(step_count_before)={self.step_count}"
+            )
+
+        # 正在做梯度累加且不是最后一次反向传播前向：走父类快速路径，跳过所有额外计算。
+        if not is_last_accum_forward:
+            if self.test_falg and self.rank == 0:
+                print("="*10,"当前非更新微步具体情况","="*10)
+                self._test_skipped_accum_forward_total += 1
+                print(
+                    f"[梯度累加测试][compute_loss] 当前为非更新微步(micro-step)，已跳过自定义逻辑；"
+                    f"累计跳过次数(skipped_accum_forward_total)={self._test_skipped_accum_forward_total}"
+                )
+            return super().compute_loss(
+                model,
+                inputs,
+                return_outputs=return_outputs,
+                num_items_in_batch=num_items_in_batch,
+            )
+
+        # 仅在真实参数更新步递增 step_count，保持其语义与 global update step 一致。
+        prev_step_count = self.step_count
         self.step_count += 1
 
+        if self.test_falg and self.rank == 0:
+            self._test_update_step_total += 1
+            expected_step_count = int(getattr(self.state, "global_step", 0)) + 1
+            step_match = self.step_count == expected_step_count
+            print("="*10,"当前更新微步具体情况","="*10)
+            print(
+                f"[梯度累加测试][compute_loss] 进入更新步逻辑: "
+                f"step_count(全局更新步计数) {prev_step_count}->{self.step_count}, "
+                f"期望step_count(=global_step+1)={expected_step_count}, "
+                f"对齐校验(step_match)={step_match}, "
+                f"累计更新步次数(update_step_total)={self._test_update_step_total}"
+            )
+
+        # ==================== 下面是真正的更新步或无梯度累加才会进入的代码 ====================
 
         if self.test_falg and self.accelerator.is_main_process:
             print("============测试模式=============")
