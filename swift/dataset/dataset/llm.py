@@ -21,7 +21,7 @@ from datasets import Dataset as HfDataset
 from typing import Dict, Any, List, Literal, Optional, Tuple, Union
 import os
 
-class FineWeb_Loader(DatasetLoader):
+class RuiLAB2_DATA_Loader(DatasetLoader):
     def __init__(self,**kwargs):
         super().__init__(**kwargs)
 
@@ -43,12 +43,8 @@ class FineWeb_Loader(DatasetLoader):
     ) -> HfDataset:
         # 1. 定义子集名称到相对路径的映射字典
         subset_map = {
-            # "CC-MAIN-2025-26": "data/CC-MAIN-2025-26",
-            # "sample-350BT-part1": "sample/350BT/part1",
-            # "sample-350BT-part2": "sample/350BT/part2",
-            # "sample-350BT-part3": "sample/350BT/part3",
-            "sample-100BT": "sample/100BT",
-
+            "fineweb_edu-sample_350BT": "fineweb_edu/sample/350BT",
+            "finemath": "finemath",
         }
         # 默认加载全部子集
         if dataset_syntax and dataset_syntax.subsets:
@@ -64,12 +60,21 @@ class FineWeb_Loader(DatasetLoader):
                     f"Unknown FineWeb subset: {subset_name}. "
                     f"Available: {list(subset_map.keys())}"
                 )
-
-            full_pattern = os.path.join(
-                dataset_meta.dataset_path,
-                relative_path,
-                "*.parquet"
-            )
+            
+            if subset_name == 'finemath':
+                # fineweb_math子集包含多个子目录，需要加载所有parquet文件
+                relative_path = os.path.join(relative_path, "**")
+                full_pattern = os.path.join(
+                    dataset_meta.dataset_path,
+                    relative_path,
+                    "*.parquet"
+                )
+            else:
+                full_pattern = os.path.join(
+                    dataset_meta.dataset_path,
+                    relative_path,
+                    "*.parquet"
+                )
 
             patterns.append(full_pattern)
 
@@ -102,16 +107,14 @@ class FineWeb_Loader(DatasetLoader):
 
 register_dataset(
     DatasetMeta(
-        dataset_path="/ruilab/jxhe/CoE_Monitor/data/fineweb_edu",
-        dataset_name="local_fineweb",
+        dataset_path="/ruilab2/hjxa/data",
+        dataset_name="ruilab2_data",
         subsets=[
-            # SubsetDataset("CC-MAIN-2025-26", split=["train"]),
-            # SubsetDataset("sample-350BT-part1", split=["train"]),
-            # SubsetDataset("sample-350BT-part2", split=["train"]),
-            # SubsetDataset("sample-350BT-part3", split=["train"]),
-            SubsetDataset("sample-100BT", split=["train"]),
+            SubsetDataset("fineweb_edu-sample_350BT", split=["train"]),
+            SubsetDataset("finemath", split=["train"]),
+
         ],
-        loader=FineWeb_Loader,
+        loader=RuiLAB2_DATA_Loader,
         huge_dataset=True,
     )
 )
