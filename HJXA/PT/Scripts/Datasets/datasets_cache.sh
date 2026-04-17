@@ -1,15 +1,15 @@
 export HF_ENDPOINT=https://hf-mirror.com
-export HF_HOME=/ruilab2/jxhe/.cache/huggingface # 指定cache位置
+export HF_HOME=/ruilab2/hjxa/.cache/huggingface # 指定cache位置
 # ================================PT数据集缓存脚本示例===============================
 swift export \
-    --model /ruilab/jxhe/CoE_Monitor/checkpoints/pythia_14m \
-    --dataset /ruilab2/jxhe/data/pile_deduplicated \
+    --model /ruilab2/hjxa/checkpoints/meta-llama/Llama-2-7b-chat-hf \
+    --dataset ruilab2_data:finemath \
     --dataset_num_proc 24 \
     --to_cached_dataset true \
     --use_chat_template false \
     --truncation_strategy right \
     --loss_scale all \
-    --output_dir /ruilab2/jxhe/data/pile_deduplicated_cached/
+    --output_dir /ruilab2/hjxa/data/fineweb_math_cached_llama2/
 
 
 # ===============================SFT数据集缓存脚本示例===============================
