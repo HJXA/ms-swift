@@ -6,7 +6,8 @@ from peft import PeftModel
 from transformers.utils import is_peft_available
 from transformers.models.auto.modeling_auto import MODEL_FOR_CAUSAL_LM_MAPPING_NAMES
 import os
-import pickle
+import gzip
+import io
 
 
 from swift.utils import get_logger,get_model_parameter_info
@@ -121,18 +122,11 @@ class CoETrainer(Seq2SeqTrainer_Swift):
                         task_type = item.get("type")
                         
                         if task_type == "tensor":
-                            # 处理 Tensor 保存
-                            torch.save(item["data"], item["path"])
-                            
-                        elif task_type == "coe":
-                            # 处理 CoE 保存
-                            with open(item["path"], "wb") as f:
-                                pickle.dump(item["data"], f)
-                                
-                            # 顺便在后台处理文件删除，避免阻塞
-                            for rm_path in item.get("remove_paths", []):
-                                if os.path.exists(rm_path):
-                                    os.remove(rm_path)
+                            buf = io.BytesIO()
+                            with gzip.GzipFile(fileobj=buf, mode='wb') as f:
+                                torch.save(item["data"], f)
+                            with open(item["path"], 'wb') as f:
+                                f.write(buf.getvalue())
                     except Exception as e:
                         print(f"[AsyncWorker] 保存出错: {e}")
                     finally:
@@ -149,15 +143,7 @@ class CoETrainer(Seq2SeqTrainer_Swift):
     def _submit_async_layer_save(self, tensor, path):
         """提交 Tensor 保存任务"""
         self._save_queue.put({"type": "tensor", "data": tensor, "path": path})
-
-    def _submit_async_coe_save(self, coe_data, path, remove_paths):
-        """提交 CoE 列表保存及旧文件清理任务"""
-        self._save_queue.put({
-            "type": "coe", 
-            "data": coe_data, 
-            "path": path, 
-            "remove_paths": remove_paths
-        })
+        
 
 
 
@@ -471,13 +457,13 @@ class CoETrainer(Seq2SeqTrainer_Swift):
 
         save_path = os.path.join(
             self.save_layer_hidden_root,
-            f"Step{step}_Rank{rank}.pt"
+            f"Step{step}_Rank{rank}.pt.gz"
         )
 
         tensor_to_save = (
             layer_hidden_state[:10]
             .detach()
-            .to(torch.bfloat16)   # 强烈建议压缩
+            .to(torch.float8_e4m3fn)
             .cpu()
         )
         if step == 1 and rank == 0:
