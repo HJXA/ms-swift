@@ -494,7 +494,8 @@ class CoETrainer(Seq2SeqTrainer_Swift):
             "CoE/Z_A_Mean": z_ang_mean,
             "CoE/A_In_Mean": a_in_mean,
             "CoE/A_Mid_Mean": a_mid_mean,
-            "CoE/A_Out_Mean": a_out_mean
+            "CoE/A_Out_Mean": a_out_mean,
+            "CoE/ACoE": (a_in_mean + a_mid_mean + a_out_mean) / 3,
         }
 
         if rank == 0:
