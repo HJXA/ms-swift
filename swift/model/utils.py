@@ -15,7 +15,8 @@ from transformers.utils import (is_torch_bf16_gpu_available, is_torch_cuda_avail
 from types import MethodType
 from typing import List, Optional, TypeVar, Union
 
-from swift.utils import HfConfigFactory, Processor, deep_getattr, get_dist_setting, get_logger, is_mp, to_device
+from swift.utils import (HfConfigFactory, Processor, deep_getattr, get_dist_setting, get_env_args, get_logger, is_mp,
+                         to_device)
 
 logger = get_logger()
 
@@ -244,7 +245,7 @@ def get_default_torch_dtype(torch_dtype: Optional[torch.dtype]):
     try:
         is_bf16_available = is_torch_bf16_gpu_available() or (is_torch_npu_available()
                                                               and torch.npu.is_bf16_supported())
-    except:  # noqa
+    except Exception:  # noqa
         is_bf16_available = False
 
     if is_torch_cuda_available() or is_torch_npu_available():
@@ -258,13 +259,11 @@ def get_default_torch_dtype(torch_dtype: Optional[torch.dtype]):
 
 
 def _patch_conv3d():
-
-    if not hasattr(nn.Conv3d, '_original_forward'):
-        nn.Conv3d._original_forward = nn.Conv3d.forward
+    if hasattr(nn.Conv3d, '_original_forward'):
+        return
+    nn.Conv3d._original_forward = nn.Conv3d.forward
 
     def forward(self, x):
-        if version.parse(torch.__version__) < version.parse('2.9.0'):
-            return self._original_forward(x)
         if any(s != k for s, k in zip(self.stride, self.kernel_size)) or any(p != 0 for p in self.padding) or any(
                 d != 1 for d in self.dilation) or self.groups != 1:
             raise NotImplementedError(
@@ -282,7 +281,8 @@ def _patch_conv3d():
     logger.info('Conv3d patched successfully')
 
 
-if strtobool(os.getenv('SWIFT_PATCH_CONV3D', 'false')):
+requires_patch = version.parse('2.9.0') <= version.parse(torch.__version__) < version.parse('2.10.0')
+if requires_patch:
     _patch_conv3d()
 
 

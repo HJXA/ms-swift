@@ -4,6 +4,7 @@ import functools
 import ipaddress
 import math
 import os
+import re
 import socket
 import time
 import torch
@@ -27,7 +28,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple, TypeVar, Union
 from swift.template import Messages
 from swift.tuners.lora import LoraConfig
 from swift.utils import (gc_collect, get_cu_seqlens_from_position_ids, get_logger, get_torch_device,
-                         is_swanlab_available, is_vllm_available, is_wandb_available, to_device)
+                         is_swanlab_available, is_vllm_available, is_wandb_available, synchronize, to_device)
 
 if is_wandb_available():
     import wandb
@@ -37,6 +38,11 @@ if is_swanlab_available():
 T = TypeVar('T')
 
 _ipv6_patch_applied = False
+
+# Constants for the RL training LoRA adapter identity.
+VLLM_LORA_INT_ID = 111
+VLLM_LORA_NAME = 'swift_lora'
+VLLM_LORA_PATH = 'swift_dummy_lora_path'
 
 if is_vllm_available():
     from vllm.lora.request import LoRARequest
@@ -206,23 +212,43 @@ def patch_stateless_process_group_for_ipv6():
 patch_stateless_process_group_for_ipv6()
 
 
-def nanstd(tensor: torch.Tensor) -> torch.Tensor:
+def nanstd(tensor: torch.Tensor,
+           dim: Optional[Union[int, tuple[int, ...]]] = None,
+           keepdim: bool = False) -> torch.Tensor:
     """
-    refer: trl/trainer/utils
-    Compute the standard deviation of a tensor, ignoring NaNs. This function only supports 1D tensors.
+    Compute the standard deviation of a tensor, ignoring NaNs.
+
+    Refer: trl/trainer/utils.py
 
     Args:
         tensor (`torch.Tensor`):
-            Input tensor of shape `(N,)`.
+            Input tensor.
+        dim (`int` or `tuple[int, ...]`, *optional*):
+            Dimension to reduce. Defaults to all dimensions.
+        keepdim (`bool`, *optional*, defaults to `False`):
+            Whether to keep reduced dimensions.
 
     Returns:
         `torch.Tensor`:
             Standard deviation of the tensor, ignoring NaNs.
     """
-    variance = torch.nanmean((tensor - torch.nanmean(tensor, keepdim=True))**2)  # Compute variance ignoring NaNs
-    count = torch.sum(~torch.isnan(tensor))  # Count of non-NaN values
-    variance *= count / (count - 1)  # Bessel's correction
-    return torch.sqrt(variance)
+    mean = torch.nanmean(tensor, dim=dim, keepdim=True)
+    variance = torch.nanmean((tensor - mean)**2, dim=dim, keepdim=True)
+    count = torch.sum(~torch.isnan(tensor), dim=dim, keepdim=True)
+    correction = count / (count - 1)
+    correction = torch.where(count > 1, correction, torch.full_like(correction, float('nan')))
+    variance *= correction  # Bessel's correction
+    std = torch.sqrt(variance)
+    if keepdim:
+        return std
+    if dim is None:
+        return std.squeeze()
+    if isinstance(dim, int):
+        return std.squeeze(dim)
+    dims = [(d if d >= 0 else d + std.ndim) for d in dim]
+    for d in sorted(dims, reverse=True):
+        std = std.squeeze(d)
+    return std
 
 
 # code borrowed from verl/verl/utils/memory_utils.py
@@ -394,8 +420,8 @@ def memory_time_profiling_context(
     logger = get_logger()
 
     # ===== Entry phase: Record initial state =====
-    if sync_cuda and torch.cuda.is_available():
-        torch.cuda.synchronize()
+    if sync_cuda:
+        synchronize()
 
     gc_collect()
 
@@ -415,8 +441,8 @@ def memory_time_profiling_context(
     yield
 
     # Synchronize and clean up memory before measuring (important for offload operations)
-    if sync_cuda and torch.cuda.is_available():
-        torch.cuda.synchronize()
+    if sync_cuda:
+        synchronize()
     gc_collect()
 
     # ===== Exit phase: Record final state =====
@@ -566,10 +592,16 @@ def profiling_context(trainer, name: str):
 
     profiling_metrics = {f'profiling/Time taken: {trainer.__class__.__name__}.{name}': duration}
 
-    if 'wandb' in trainer.args.report_to and wandb.run is not None and trainer.accelerator.is_main_process:
-        wandb.log(profiling_metrics)
+    is_main_process = False
+    if hasattr(trainer, 'accelerator'):
+        is_main_process = trainer.accelerator.is_main_process
+    elif hasattr(trainer, 'is_main_process'):
+        is_main_process = trainer.is_main_process
 
-    if 'swanlab' in trainer.args.report_to and swanlab.get_run() is not None and trainer.accelerator.is_main_process:
+    if 'wandb' in trainer.args.report_to and wandb.run is not None and is_main_process:
+        wandb.log(profiling_metrics, commit=False)
+
+    if 'swanlab' in trainer.args.report_to and swanlab.get_run() is not None and is_main_process:
         swanlab.log(profiling_metrics)
 
 
@@ -826,25 +858,17 @@ def prepare_fsdp(model, accelerator, evaluation_mode: bool = True):
     return model
 
 
-def patch_vllm_moe_model_weight_loader(model):
-    """
-    Patch vLLM MoE model to add weight_loader attribute to expert weights.
+_moe_model_registry_cache = None
 
-    This is a workaround for a bug in vLLM 0.8.2 where MoE weights (w13_weight, w2_weight)
-    don't have the weight_loader attribute, causing AttributeError during weight loading.
-    Code adapted from verl/verl/utils/vllm/patch.py
 
-    Args:
-        model: The vLLM model to patch.
-    """
+def _get_moe_model_registry():
+
+    global _moe_model_registry_cache
+    if _moe_model_registry_cache is not None:
+        return _moe_model_registry_cache
+
     import importlib
 
-    # Check if already patched (idempotent)
-    if getattr(model, '_swift_moe_weight_loader_patched', False):
-        return
-
-    # MoE model configurations: (module_path, class_names, mlp_attr)
-    # mlp_attr specifies the attribute name for the MoE layer in each model
     moe_model_configs = [
         ('vllm.model_executor.models.deepseek_v2', ('DeepseekV2ForCausalLM', 'DeepseekV3ForCausalLM'), 'mlp'),
         ('vllm.model_executor.models.mixtral', ('MixtralForCausalLM', ), 'block_sparse_moe'),
@@ -855,7 +879,6 @@ def patch_vllm_moe_model_weight_loader(model):
         ('vllm.model_executor.models.kimi_vl', ('KimiVLForConditionalGeneration', ), 'mlp'),
     ]
 
-    # Build supported models list and MLP attribute mapping
     supported_moe_models = []
     mlp_attr_mapping = {}
 
@@ -867,10 +890,32 @@ def patch_vllm_moe_model_weight_loader(model):
                     model_class = getattr(module, class_name)
                     supported_moe_models.append(model_class)
                     mlp_attr_mapping[model_class] = mlp_attr
-        except (ImportError, AttributeError):
+        except (ImportError, AttributeError, RuntimeError):
             pass
 
-    # Early return if no MoE models are supported
+    _moe_model_registry_cache = (supported_moe_models, mlp_attr_mapping)
+    return _moe_model_registry_cache
+
+
+def patch_vllm_moe_model_weight_loader(model):
+    """
+    Patch vLLM MoE model to add weight_loader attribute to expert weights.
+
+    This is a workaround for a bug in vLLM 0.8.2 where MoE weights (w13_weight, w2_weight)
+    don't have the weight_loader attribute, causing AttributeError during weight loading.
+    Code adapted from verl/verl/utils/vllm/patch.py
+
+    Args:
+        model: The vLLM model to patch.
+    """
+    # Check if already patched (idempotent).
+    # Note: the flag can be lost when vLLM sleep/wake_up recreates the model
+    # object, so the expensive import step is cached in _get_moe_model_registry.
+    if getattr(model, '_swift_moe_weight_loader_patched', False):
+        return
+
+    supported_moe_models, mlp_attr_mapping = _get_moe_model_registry()
+
     if not supported_moe_models:
         return
 
@@ -1022,6 +1067,49 @@ def patch_vllm_load_adapter():
             TokenizerGroup.get_lora_tokenizer = patched_get_lora_tokenizer
 
 
+def expand_vllm_param_name_aliases(param_names: set[str]) -> set[str]:
+    stacked_mappings = [
+        (re.compile(r'\bqkv_proj\b'), ('q_proj', 'k_proj', 'v_proj', 'q', 'k', 'v')),
+        (re.compile(r'\bgate_up_proj\b'), ('gate_proj', 'up_proj')),
+        (re.compile(r'\bin_proj_ba\b'), ('in_proj_b', 'in_proj_a')),
+        (re.compile(r'\blanguage_model\.model\b'), ('model.language_model', )),
+        (re.compile(r'^visual\.'), ('model.visual.', )),
+    ]
+
+    def _expand_once(keys: set[str]) -> set[str]:
+        expanded = set(keys)
+        for key in keys:
+            for pattern, aliases in stacked_mappings:
+                if pattern.search(key):
+                    for alias in aliases:
+                        expanded.add(pattern.sub(alias, key))
+        return expanded
+
+    # Two passes allow chained replacement:
+    # e.g. language_model.model + qkv_proj -> model.language_model + q_proj
+    expanded = _expand_once(param_names)
+    expanded = _expand_once(expanded)
+    return expanded
+
+
+def add_base_layer_suffix_by_param_names(weight_iterator: Iterable[Tuple[str, Any]],
+                                         vllm_param_names: set[str]) -> Iterable[Tuple[str, Any]]:
+    """Map HF dense param names to vLLM LoRA-wrapped modules (*.base_layer.weight / .bias)."""
+    for name, tensor in weight_iterator:
+        if '.base_layer.' in name or '.' not in name:
+            yield name, tensor
+            continue
+        if name in vllm_param_names:
+            yield name, tensor
+            continue
+        module_name, param_type = name.rsplit('.', 1)
+        if param_type in {'weight', 'bias'}:
+            bl = f'{module_name}.base_layer.{param_type}'
+            if bl in vllm_param_names:
+                name = bl
+        yield name, tensor
+
+
 # FlattenedTensor, code borrowed from sglang/srt/weight_sync/tensor_bucket.py
 class FlattenedTensorMetadata(BaseModel):
     """Metadata for a tensor in a flattened bucket"""
@@ -1031,18 +1119,6 @@ class FlattenedTensorMetadata(BaseModel):
     start_idx: int
     end_idx: int
     numel: int
-
-    @field_validator('shape', mode='before')
-    @classmethod
-    def ensure_shape_tuple(cls, v: Any) -> Tuple[int, ...]:
-        # accept tuple/list, torch.Size, or other iterable of ints
-        if torch is not None and isinstance(v, torch.Size):
-            return tuple(int(x) for x in v)
-        if isinstance(v, (list, tuple)):
-            return tuple(int(x) for x in v)
-        if isinstance(v, Iterable):
-            return tuple(int(x) for x in v)
-        raise ValueError('shape must be an iterable of ints (e.g. tuple/list/torch.Size)')
 
     @field_validator('dtype', mode='before')
     @classmethod
@@ -1064,7 +1140,6 @@ class TensorMetadata(BaseModel):
 
 
 class UpdateFlattenedAdapterRequest(BaseModel):
-    lora_int_id: int
     peft_config: LoraConfig
     metadatas: List[FlattenedTensorMetadata]
 
@@ -1075,7 +1150,6 @@ class UpdateFlattenedParamsRequest(BaseModel):
 
 class UpdateAdapterRequest(BaseModel):
     """Request for non-flattened adapter weight update"""
-    lora_int_id: int
     peft_config: LoraConfig
     lora_tensors_metadata: List[TensorMetadata]
 
@@ -1092,46 +1166,30 @@ class FlattenedTensorBucket:
         flattened_tensor: torch.Tensor = None,
         metadata: List[FlattenedTensorMetadata] = None,
     ):
-        """
-        Initialize a tensor bucket from a list of named tensors OR from pre-flattened data.
-        Args:
-            named_tensors: List of (name, tensor) tuples (for creating new bucket)
-            flattened_tensor: Pre-flattened tensor (for reconstruction)
-            metadata: Pre-computed metadata (for reconstruction)
-        """
         if named_tensors is not None:
-            # Create bucket from named tensors
-            self.metadata: List[FlattenedTensorMetadata] = [None] * len(named_tensors)
-            self.flattened_tensor: torch.Tensor = None
-
             if not named_tensors:
                 raise ValueError('Cannot create empty tensor bucket')
 
-            # First pass: compute total size and metadata
-            current_idx = 0
-            total_numel = 0
+            self.metadata: List[FlattenedTensorMetadata] = [None] * len(named_tensors)
+            flattened_chunks: List[torch.Tensor] = [None] * len(named_tensors)
+            current_byte = 0
+
             for i, (name, tensor) in enumerate(named_tensors):
-                numel = tensor.numel()
-                metadata_obj = FlattenedTensorMetadata(
+                flat_u8 = tensor.flatten().view(torch.uint8)
+                flattened_chunks[i] = flat_u8
+
+                numel = flat_u8.numel()
+                self.metadata[i] = FlattenedTensorMetadata(
                     name=name,
                     shape=tuple(tensor.shape),
                     dtype=str(tensor.dtype),
-                    start_idx=current_idx,
-                    end_idx=current_idx + numel,
+                    start_idx=current_byte,
+                    end_idx=current_byte + numel,
                     numel=numel,
                 )
-                self.metadata[i] = metadata_obj
-                current_idx += numel
-                total_numel += numel
+                current_byte += numel
 
-            # Pre-allocate the final flattened tensor to avoid intermediate copies
-            # Use the dtype and device of the first tensor
-            first_tensor = named_tensors[0][1]
-            self.flattened_tensor = torch.empty(total_numel, dtype=first_tensor.dtype, device=first_tensor.device)
-
-            # Second pass: copy data directly into pre-allocated tensor
-            for meta, (name, tensor) in zip(self.metadata, named_tensors):
-                self.flattened_tensor[meta.start_idx:meta.end_idx].copy_(tensor.flatten())
+            self.flattened_tensor = torch.cat(flattened_chunks, dim=0)
         else:
             # Initialize from pre-flattened data
             if flattened_tensor is None or metadata is None:
@@ -1156,14 +1214,10 @@ class FlattenedTensorBucket:
         reconstructed = {}
 
         for meta in self.metadata:
-            tensor = self.flattened_tensor[meta.start_idx:meta.end_idx].reshape(meta.shape)
             dtype = getattr(torch, meta.dtype.split('.')[-1])
-            # batch dtype conversion (if needed)
-            if tensor.dtype != dtype:
-                tensor = tensor.to(dtype)
-
+            byte_slice = self.flattened_tensor[meta.start_idx:meta.end_idx]
+            tensor = byte_slice.view(dtype).reshape(meta.shape)
             reconstructed[meta.name] = tensor
-
         return reconstructed
 
 
@@ -1470,6 +1524,15 @@ def check_vllm_version_ge(min_version: str) -> bool:
     if vllm_version is None or 'dev' in vllm_version:
         return True
     return version.parse(vllm_version) >= version.parse(min_version)
+
+
+def vllm_supports_lora_load_inplace() -> bool:
+    """True when vLLM LoRARequest supports load_inplace (replaces same lora_int_id without remove_lora).
+
+    Introduced in vLLM v0.15.0 (see vllm/lora/request.py). Older versions require remove_lora before add_lora
+    when reusing a stable adapter id.
+    """
+    return check_vllm_version_ge('0.15.0')
 
 
 # ============================================================================

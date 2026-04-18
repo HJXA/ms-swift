@@ -3,12 +3,12 @@ import asyncio
 import inspect
 import os
 import torch
-from contextlib import nullcontext
-from copy import deepcopy
+from contextlib import contextmanager, nullcontext
+from copy import copy, deepcopy
 from packaging import version
 from PIL import Image
 from tqdm import tqdm
-from transformers import GenerationConfig
+from transformers import AutoConfig, GenerationConfig
 from transformers.utils import is_torch_npu_available
 from typing import Any, AsyncIterator, Dict, Iterator, List, Optional, Union
 
@@ -17,7 +17,7 @@ from swift.model import get_processor
 from swift.template import Template
 from swift.utils import get_device, get_dist_setting, get_logger, is_dist, safe_snapshot_download
 from .infer_engine import InferEngine
-from .patch import patch_auto_config, patch_auto_tokenizer
+from .patch import patch_auto_tokenizer
 from .protocol import (ChatCompletionResponse, ChatCompletionResponseChoice, ChatCompletionResponseStreamChoice,
                        ChatCompletionStreamResponse, ChatMessage, DeltaMessage, EmbeddingResponse,
                        EmbeddingResponseData, InferRequest, RequestConfig, random_uuid)
@@ -59,6 +59,7 @@ class VllmEngine(InferEngine):
         adapters: Optional[List[str]] = None,
         use_async_engine: bool = False,
         model_type: Optional[str] = None,
+        template_type: Optional[str] = None,
         use_hf: Optional[bool] = None,
         hub_token: Optional[str] = None,
         revision: Optional[str] = None,
@@ -134,12 +135,13 @@ class VllmEngine(InferEngine):
         self.quantization = quantization
         self.num_labels = num_labels
         self.reranker_use_activation = reranker_use_activation
+        self._config_cls = None
 
         patch_vllm_memory_leak()
         self._adapters_pool = {}
         if template is None:
             processor = self._get_processor()
-            template = self._get_template(processor)
+            template = self._get_template(processor, template_type=template_type)
         else:
             safe_snapshot_download(
                 model_id_or_path,
@@ -177,10 +179,30 @@ class VllmEngine(InferEngine):
             task_type=self.task_type)
 
     def _prepare_engine(self) -> None:
-        with patch_auto_tokenizer(self.tokenizer), patch_auto_config(self.config):
+        with patch_auto_tokenizer(self.tokenizer), self._patch_auto_config():
             llm_engine_cls = AsyncLLMEngine if self.use_async_engine else LLMEngine
             engine = llm_engine_cls.from_engine_args(self.engine_args)
         self.engine = engine
+
+    @contextmanager
+    def _patch_auto_config(self):
+        _old_from_pretrained = AutoConfig.from_pretrained
+
+        def _from_pretrained(*args, **kwargs):
+            config = deepcopy(self.config)
+            if self._version_ge('0.19'):
+                if self._config_cls is None:
+                    hf_config = _old_from_pretrained(*args, **kwargs)
+                    self._config_cls = hf_config.__class__
+                if not isinstance(config, self._config_cls):
+                    config.__class__ = self._config_cls
+            return config
+
+        AutoConfig.from_pretrained = _from_pretrained
+        try:
+            yield
+        finally:
+            AutoConfig.from_pretrained = _old_from_pretrained
 
     def _prepare_engine_kwargs(self, max_model_len, engine_kwargs) -> None:
         if engine_kwargs is None:
@@ -214,7 +236,7 @@ class VllmEngine(InferEngine):
                 'The current version of vLLM does not support `limit_mm_per_prompt`. Please upgrade vLLM.')
         for key in [
                 'enable_expert_parallel', 'enable_sleep_mode', 'disable_cascade_attn', 'load_format',
-                'mm_processor_cache_gb', 'speculative_config', 'logprobs_mode'
+                'mm_processor_cache_gb', 'speculative_config', 'logprobs_mode', 'quantization'
         ]:
             if key in parameters:
                 value = getattr(self, key, None)

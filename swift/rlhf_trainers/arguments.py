@@ -1,13 +1,23 @@
 # Copyright (c) ModelScope Contributors. All rights reserved.
+import trl
 from dataclasses import dataclass
+from packaging import version
 from transformers.utils.versions import require_version
-from trl import CPOConfig as HfCPOConfig
+
+if version.parse(trl.__version__) <= version.parse('0.28'):
+    from trl import CPOConfig as HfCPOConfig
+    from trl import GKDConfig as HfGKDConfig
+    from trl import ORPOConfig as HfORPOConfig
+    from trl import PPOConfig as HfPPOConfig
+else:
+    from trl.experimental.cpo import CPOConfig as HfCPOConfig
+    from trl.experimental.gkd import GKDConfig as HfGKDConfig
+    from trl.experimental.orpo import ORPOConfig as HfORPOConfig
+    from trl.experimental.ppo import PPOConfig as HfPPOConfig
+
 from trl import DPOConfig as HfDPOConfig
-from trl import GKDConfig as HfGKDConfig
 from trl import GRPOConfig as HfGRPOConfig
 from trl import KTOConfig as HfKTOConfig
-from trl import ORPOConfig as HfORPOConfig
-from trl import PPOConfig as HfPPOConfig
 from trl import RewardConfig as HfRewardConfig
 from typing import Optional
 
@@ -18,6 +28,10 @@ from .args_mixin import GRPOArgumentsMixin, RolloutTrainerArgumentsMixin
 @dataclass
 class DPOConfig(TrainArgumentsMixin, HfDPOConfig):
     ld_alpha: Optional[float] = None  # compat trl==0.15
+    # Fields removed in trl 0.29, kept here for backward compatibility
+    rpo_alpha: Optional[float] = None
+    ref_adapter_name: Optional[str] = None
+    reference_free: Optional[bool] = None
 
     def __post_init__(self):
         TrainArgumentsMixin.__post_init__(self)

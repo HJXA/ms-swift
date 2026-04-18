@@ -11,9 +11,9 @@
 | software  | version         |
 | --------- | --------------- |
 | Python    | >= 3.10, < 3.12 |
-| CANN      | == 8.3.RC1      |
+| CANN      | == 8.5.1        |
 | torch     | == 2.7.1        |
-| torch_npu | == 2.7.1        |
+| torch_npu | == 2.7.1.post2  |
 
 
 基础环境准备请参照这份 [Ascend PyTorch 安装文档](https://gitcode.com/Ascend/pytorch)。
@@ -25,7 +25,7 @@
 ### 环境安装
 ```shell
 # 创建新的 conda 虚拟环境（可选）
-conda create -n swift-npu python=3.10 -y
+conda create -n swift-npu python=3.11 -y
 conda activate swift-npu
 
 # 注意进行后续操作前要先 source 激活 CANN 环境
@@ -41,7 +41,7 @@ cd ms-swift
 pip install -e .
 
 # 安装 torch-npu
-pip install torch-npu decorator
+pip install torch_npu decorator
 # 如果你想要使用 deepspeed（控制显存占用，训练速度会有一定下降）
 pip install deepspeed
 
@@ -49,8 +49,8 @@ pip install deepspeed
 pip install evalscope[opencompass]
 
 # 如果需要使用 vllm-ascend 进行推理，请安装以下包
-pip install vllm==0.11.0
-pip install vllm-ascend==0.11.0rc3
+pip install vllm==0.14.0
+pip install vllm-ascend==0.14.0rc1
 ```
 
 测试环境是否安装正确，NPU能否被正常加载：
@@ -65,20 +65,26 @@ print(torch.randn(10, device='npu:0'))
 
 **如果需要使用 MindSpeed(Megatron-LM)，请按照下面引导安装必要依赖**
 ```shell
-# 1. 获取并切换 Megatron-LM 至 core_v0.12.1 版本
+# 1. 获取并切换 Megatron-LM 至 v0.15.3 版本
 git clone https://github.com/NVIDIA/Megatron-LM.git
 cd Megatron-LM
-git checkout core_v0.12.1
+git checkout v0.15.3
 cd ..
 
 # 2. 获取并安装 MindSpeed
 git clone https://gitcode.com/Ascend/MindSpeed.git
 cd MindSpeed
-git checkout 2.3.0_core_r0.12.1
+git checkout core_r0.15.3
 pip install -e .
 cd ..
 
-# 3. 设置环境变量
+# 3. 获取并安装 mcore-bridge
+git clone https://github.com/modelscope/mcore-bridge.git
+cd mcore-bridge
+pip install -e .
+cd ..
+
+# 4. 设置环境变量
 export PYTHONPATH=$PYTHONPATH:<your_local_megatron_lm_path>
 export MEGATRON_LM_PATH=<your_local_megatron_lm_path>
 ```
@@ -303,10 +309,10 @@ ASCEND_RT_VISIBLE_DEVICES=0 swift deploy --model xxx/checkpoint-xxx-merged --max
 使用pypi进行安装：
 ```shell
 # Install vllm-project/vllm. The newest supported version is v0.11.0.
-pip install vllm==0.11.0
+pip install vllm==0.14.0
 
 # Install vllm-project/vllm-ascend from pypi.
-pip install vllm-ascend==0.11.0rc3
+pip install vllm-ascend==0.14.0rc1
 ```
 原始模型：
 ```shell

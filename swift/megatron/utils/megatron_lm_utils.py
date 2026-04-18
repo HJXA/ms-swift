@@ -10,6 +10,7 @@ import torch
 from argparse import Namespace
 from contextlib import contextmanager
 from datetime import timedelta
+from mcore_bridge import set_random_seed, unwrap_model
 from megatron.core import dist_checkpointing, mpu, tensor_parallel
 from megatron.core.dist_checkpointing.mapping import ShardedObject
 from megatron.core.dist_checkpointing.serialization import (get_default_load_sharded_strategy,
@@ -19,13 +20,16 @@ from megatron.core.dist_checkpointing.strategies.fully_parallel import (FullyPar
                                                                         FullyParallelSaveStrategyWrapper)
 from megatron.core.distributed import DistributedDataParallel as DDP
 from megatron.core.distributed import DistributedDataParallelConfig
+from megatron.core.fusions.fused_bias_dropout import bias_dropout_add_fused_train
+from megatron.core.fusions.fused_bias_gelu import bias_gelu
+from megatron.core.fusions.fused_bias_swiglu import bias_swiglu
 from megatron.core.optimizer_param_scheduler import OptimizerParamScheduler
 from megatron.core.transformer.module import Float16Module
-from megatron.core.utils import get_te_version, get_torch_version, is_te_min_version, is_torch_min_version
+from megatron.core.utils import get_torch_version, is_te_min_version, is_torch_min_version
 from packaging import version
 from typing import Optional
 
-from swift.utils import check_json_format, get_logger, init_process_group, is_master, seed_everything, set_device
+from swift.utils import check_json_format, get_logger, init_process_group, is_master, set_device
 from .patcher import patch_merge_fn
 
 logger = get_logger()
@@ -77,28 +81,6 @@ def _initialize_mpu(args):
             logger.info(f'TP: {args.tensor_model_parallel_size}, PP: {args.pipeline_model_parallel_size}, '
                         f'VPP: {args.virtual_pipeline_model_parallel_size}, CP: {args.context_parallel_size}, '
                         f'EP: {args.expert_model_parallel_size}, ETP: {args.expert_tensor_parallel_size}')
-
-
-def set_random_seed(
-    seed_: int,
-    data_parallel_random_init: bool = False,
-    te_rng_tracker: bool = False,
-    inference_rng_tracker: bool = False,
-    use_cudagraphable_rng: bool = False,
-):
-    """Set random seed for reproducability."""
-    if seed_ is not None and seed_ > 0:
-        # Ensure that different pipeline MP stages get different seeds.
-        seed = seed_ + (1009 * mpu.get_pipeline_model_parallel_rank())
-        # Ensure different data parallel ranks get different seeds
-        if data_parallel_random_init:
-            seed = seed + (11 * mpu.get_data_parallel_rank())
-        seed_everything(seed)
-        if torch.cuda.device_count() > 0:
-            tensor_parallel.model_parallel_cuda_manual_seed(seed, te_rng_tracker, inference_rng_tracker,
-                                                            use_cudagraphable_rng)
-    else:
-        raise ValueError('Seed ({}) should be a positive integer.'.format(seed_))
 
 
 def initialize_megatron(args):
@@ -174,9 +156,9 @@ def _generate_state_dict(args,
     return state_dict
 
 
-def _filter_adapter_state_dict(state_dict, is_peft_format: bool, adapter_name: str = 'default'):
+def _filter_adapter_state_dict(state_dict, peft_format: bool, adapter_name: str = 'default'):
     """
-    When is_peft_format is True, keep only the PEFT format state_dict;
+    When peft_format is True, keep only the PEFT format state_dict;
     when False, remove the PEFT format state_dict.
 
     This function ensures it is called when tuner_type != 'full'.
@@ -196,7 +178,7 @@ def _filter_adapter_state_dict(state_dict, is_peft_format: bool, adapter_name: s
         new_state_dict = {}
         state_dict_model = state_dict[model_key]
         for k, v in state_dict_model.items():
-            if is_peft_format:
+            if peft_format:
                 if '.lora_A.' in k or '.lora_B.' in k or '.modules_to_save.' in k:
                     new_state_dict[k] = v
             else:
@@ -247,7 +229,7 @@ def save_mcore_checkpoint(
     opt_param_scheduler=None,
     iteration=1,
     output_dir: Optional[str] = None,
-    is_peft_format: bool = False,
+    peft_format: bool = False,
 ):
     if output_dir is None:
         output_dir = args.output_dir
@@ -267,7 +249,7 @@ def save_mcore_checkpoint(
         model_sd_kwargs={'metadata': sharded_sd_metadata},
         optim_sd_kwargs={'metadata': sharded_sd_metadata},
     )
-    _filter_adapter_state_dict(state_dict, is_peft_format)
+    _filter_adapter_state_dict(state_dict, peft_format)
 
     save_strategy = get_default_save_sharded_strategy()
     save_strategy = FullyParallelSaveStrategyWrapper(
@@ -275,23 +257,26 @@ def save_mcore_checkpoint(
         mpu.get_data_parallel_group(with_context_parallel=True),
     )
     kwargs = {'content_metadata': sharded_sd_metadata} if mcore_013 else {}
-    async_save_request = dist_checkpointing.save(
-        state_dict,
-        checkpoint_dir,
-        save_strategy,
-        async_sharded_save=args.async_save,
-        validate_access_integrity=True,
-        preprocess_common_before_consistancy_check=_preprocess_common_before_consistancy_check,
-        **kwargs)
-    tracker_path = os.path.join(output_dir, 'latest_checkpointed_iteration.txt')
-    try:
-        from megatron.core.msc_utils import open_file
-    except ImportError:
-        open_file = open
-    with open_file(tracker_path, 'w') as f:
-        f.write(str(iteration))
+    async_save = args.async_save
+    if not models:  # save GPU memory
+        assert 'optimizer' not in state_dict
+        async_save = False
+        common_path = os.path.join(checkpoint_dir, 'common.pt')
+        if is_master():
+            state_dict.update(kwargs)
+            torch.save(state_dict, common_path)
+        async_save_request = None
+    else:
+        async_save_request = dist_checkpointing.save(
+            state_dict,
+            checkpoint_dir,
+            save_strategy,
+            async_sharded_save=async_save,
+            validate_access_integrity=True,
+            preprocess_common_before_consistancy_check=_preprocess_common_before_consistancy_check,
+            **kwargs)
 
-    if not args.async_save:
+    if not async_save:
         assert async_save_request is None
         # Wait so everyone is done (necessary)
         if torch.distributed.is_initialized():
@@ -299,17 +284,24 @@ def save_mcore_checkpoint(
 
     if is_master():
 
-        def iter_finalize_fn():
-            if models:
-                logger.info(f'Successfully saved Megatron model weights in `{output_dir}`.')
+        tracker_path = os.path.join(output_dir, 'latest_checkpointed_iteration.txt')
+        try:
+            from megatron.core.msc_utils import open_file
+        except ImportError:
+            open_file = open
+        with open_file(tracker_path, 'w') as f:
+            f.write(str(iteration))
 
-        if args.async_save:
+        def iter_finalize_fn():
+            logger.info(f'Successfully saved Megatron model weights in `{output_dir}`.')
+
+        if async_save:
             assert async_save_request is not None
             async_save_request.add_finalize_fn(iter_finalize_fn)
         else:
             iter_finalize_fn()
 
-    if args.async_save:
+    if async_save:
         schedule_async_save(async_save_request)
 
 
@@ -378,19 +370,20 @@ def load_mcore_checkpoint(args,
                           load_arg: str = 'mcore_model',
                           adapter_name: str = 'default'):
     if load_arg in {'mcore_adapter', 'mcore_ref_adapter'}:
-        is_peft_format = True
+        peft_format = True
     else:
         # 'mcore_model', 'mcore_ref_model'
-        is_peft_format = False
+        peft_format = False
     load_dir = getattr(args, load_arg)
 
     no_load_optim = args.no_load_optim
     no_load_rng = args.no_load_rng
     finetune = args.finetune
-    if not is_peft_format and args.tuner_type != 'full':
+    if not peft_format and args.tuner_type != 'full':
+        # When training with LoRA and loading the base model
         no_load_optim = True
         no_load_rng = True
-        finetune = False
+        finetune = True
     models = unwrap_model(ddp_models)
     tracker_path = os.path.join(load_dir, 'latest_checkpointed_iteration.txt')
     iteration = _load_iteration(tracker_path)
@@ -440,7 +433,7 @@ def load_mcore_checkpoint(args,
         iteration=iteration,
         model_sd_kwargs=model_sd_kwargs,
         optim_sd_kwargs=optim_sd_kwargs)
-    _filter_adapter_state_dict(sharded_state_dict, is_peft_format, adapter_name=adapter_name)
+    _filter_adapter_state_dict(sharded_state_dict, peft_format, adapter_name=adapter_name)
     model_keys = [k for k in sharded_state_dict.keys() if k.startswith('model')]  # compat vpp
     for k in model_keys:
         patch_merge_fn(sharded_state_dict[k])
@@ -578,31 +571,6 @@ def get_optimizer_param_scheduler(args, optimizer):
     return opt_param_scheduler
 
 
-def unwrap_model(models, module_instances=None):
-    """Unwrap_model to return the final model instance"""
-    try:
-        from megatron.core.utils import unwrap_model
-        return unwrap_model(models, module_instances)
-    except ImportError:
-        pass
-    if module_instances is None:
-        from megatron.core.distributed import TorchFullyShardedDataParallel as torch_FSDP
-        module_instances = (DDP, torch_FSDP, Float16Module)
-
-    return_list = True
-    if not isinstance(models, list):
-        models = [models]
-        return_list = False
-    unwrapped_model = []
-    for model in models:
-        while isinstance(model, module_instances):
-            model = model.module
-        unwrapped_model.append(model)
-    if not return_list:
-        return unwrapped_model[0]
-    return unwrapped_model
-
-
 def should_disable_forward_pre_hook(args):
     """Block forward pre-hook for certain configurations."""
     return args.use_distributed_optimizer and args.overlap_param_gather
@@ -648,3 +616,61 @@ def initialize_tp_communicators(args, config):
             tp_size=args.tensor_model_parallel_size,
             use_fp8=(args.fp8 is not None),
         )
+
+
+def warmup_jit_function(config, args):
+    if args.bf16:
+        dtype = torch.bfloat16
+    elif args.fp16:
+        dtype = torch.float16
+    else:
+        dtype = torch.float32
+
+    bias = torch.rand(config.ffn_hidden_size // config.tensor_model_parallel_size, dtype=dtype, device='cuda')
+    input_tensor = torch.rand(
+        (
+            args.seq_length // config.context_parallel_size,
+            args.micro_batch_size,
+            config.ffn_hidden_size // config.tensor_model_parallel_size,
+        ),
+        dtype=dtype,
+        device='cuda',
+    )
+    # Warmup JIT fusions with the input_tensor grad_enable state of both forward
+    # prop and recomputation
+    for bias_grad, input_grad in zip([True, True], [False, True]):
+        bias.requires_grad, input_tensor.requires_grad = bias_grad, input_grad
+        for _ in range(5):
+            if config.swiglu:
+                output = bias_swiglu(input_tensor, bias)
+            else:
+                output = bias_gelu(bias, input_tensor)
+    del bias, input_tensor, output
+
+    # Warmup fused bias+dropout+add
+    if config.sequence_parallel:
+        seq_length = args.seq_length // mpu.get_tensor_model_parallel_world_size()
+    else:
+        seq_length = args.seq_length
+    input_tensor = torch.rand(
+        (seq_length // config.context_parallel_size, args.micro_batch_size, config.hidden_size),
+        dtype=dtype,
+        device='cuda',
+    )
+    residual = torch.rand(
+        (seq_length // config.context_parallel_size, args.micro_batch_size, config.hidden_size),
+        dtype=dtype,
+        device='cuda',
+    )
+    bias = torch.rand((config.hidden_size), dtype=dtype, device='cuda').expand_as(residual)
+    dropout_rate = 0.1
+    # Warmup JIT fusions with the input_tensor grad_enable state of both forward
+    # prop and recomputation
+    for input_grad, bias_grad, residual_grad in zip([False, True], [True, True], [True, True]):
+        input_tensor.requires_grad = input_grad
+        bias.requires_grad = bias_grad
+        residual.requires_grad = residual_grad
+        for _ in range(5):
+            output = bias_dropout_add_fused_train([input_tensor, bias], residual, dropout_rate)
+    del bias, input_tensor, residual, output
+    torch.cuda.empty_cache()

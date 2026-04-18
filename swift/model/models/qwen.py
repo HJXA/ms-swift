@@ -1,5 +1,6 @@
 # Copyright (c) ModelScope Contributors. All rights reserved.
 import importlib.metadata
+import inspect
 import os
 import torch
 import transformers
@@ -538,6 +539,10 @@ register_model(
                 Model('Qwen/Qwen3Guard-Gen-8B', 'Qwen/Qwen3Guard-Gen-8B'),
             ], TemplateType.qwen3_guard),
             ModelGroup([
+                Model('Alibaba-AAIG/YuFeng-XGuard-Reason-0.6B', 'Alibaba-AAIG/YuFeng-XGuard-Reason-0.6B'),
+                Model('Alibaba-AAIG/YuFeng-XGuard-Reason-8B', 'Alibaba-AAIG/YuFeng-XGuard-Reason-8B'),
+            ], TemplateType.yufeng_xguard),
+            ModelGroup([
                 Model('Qwen/Qwen3-4B-Thinking-2507', 'Qwen/Qwen3-4B-Thinking-2507'),
                 Model('Qwen/Qwen3-4B-Thinking-2507-FP8', 'Qwen/Qwen3-4B-Thinking-2507-FP8'),
             ], TemplateType.qwen3_thinking),
@@ -603,6 +608,13 @@ register_model(
                     Model('swift/Qwen3-235B-A22B-Thinking-2507-AWQ'),
                 ],
                 TemplateType.qwen3_thinking),
+            ModelGroup([
+                Model('AIDC-AI/Marco-Nano-Base', 'AIDC-AI/Marco-Nano-Base'),
+                Model('AIDC-AI/Marco-Nano-Instruct', 'AIDC-AI/Marco-Nano-Instruct'),
+                Model('AIDC-AI/Marco-Mini-Base', 'AIDC-AI/Marco-Mini-Base'),
+                Model('AIDC-AI/Marco-Mini-Instruct', 'AIDC-AI/Marco-Mini-Instruct'),
+                Model('AIDC-AI/Marco-Mini-Global-Base', 'AIDC-AI/Marco-Mini-Global-Base'),
+            ], TemplateType.qwen3_nothinking),
         ],
         requires=['transformers>=4.51'],
         architectures=['Qwen3MoeForCausalLM'],
@@ -787,6 +799,8 @@ register_model(
             ModelGroup([
                 Model('Qwen/QVQ-72B-Preview', 'Qwen/QVQ-72B-Preview'),
             ], TemplateType.qvq),
+            ModelGroup([Model('OpenDataLab/MinerU2.5-Pro-2604-1.2B', 'opendatalab/MinerU2.5-Pro-2604-1.2B')],
+                       TemplateType.qwen2_vl),
         ],
         Qwen2VLLoader,
         model_arch=ModelArch.qwen2_vl,
@@ -939,6 +953,10 @@ def _patch_deepstack_process(model):
             return hidden_states + visual_embeds.mean() * 0
         visual_pos_masks = visual_pos_masks.to(hidden_states.device)
         visual_embeds = visual_embeds.to(hidden_states.device, hidden_states.dtype)
+        if hidden_states.ndim == 3 and visual_pos_masks.ndim == 3:
+            # https://github.com/huggingface/transformers/pull/41741
+            # fix qwen3-omni transformers<5.0
+            visual_pos_masks = visual_pos_masks[..., 0]
         local_this = hidden_states[visual_pos_masks, :].clone() + visual_embeds
         hidden_states[visual_pos_masks, :] = local_this
         return hidden_states
@@ -989,14 +1007,19 @@ def _compat_qwen3_vl_mixed_data(model, processor, is_moe: bool = False):
         inputs_embeds, visual_pos_masks, deepstack_visual_embeds = _forward_qwen3_vl_or_qwen3_omni(
             self, processor, input_ids, inputs_embeds, pixel_values, pixel_values_videos, image_grid_thw,
             video_grid_thw)
+        mm_token_type_ids = kwargs.pop('mm_token_type_ids', None)
         if position_ids is None:
             past_key_values_length = 0 if past_key_values is None else past_key_values.get_seq_length()
             if self.rope_deltas is None or past_key_values_length == 0:
+                get_kwargs = {}
+                if mm_token_type_ids is not None:
+                    get_kwargs['mm_token_type_ids'] = mm_token_type_ids
                 position_ids, rope_deltas = self.get_rope_index(
                     input_ids,
-                    image_grid_thw,
-                    video_grid_thw,
+                    image_grid_thw=image_grid_thw,
+                    video_grid_thw=video_grid_thw,
                     attention_mask=attention_mask,
+                    **get_kwargs,
                 )
                 self.rope_deltas = rope_deltas
             # then use the prev pre-calculated rope-deltas to get the correct position ids
@@ -1043,7 +1066,8 @@ class Qwen3VLLoader(Qwen2VLLoader):
         from transformers import Qwen3VLForConditionalGeneration
         self.auto_model_cls = self.auto_model_cls or Qwen3VLForConditionalGeneration
         model = super().get_model(model_dir, config, processor, model_kwargs)
-        _compat_qwen3_vl_mixed_data(model.model, processor)
+        is_moe = getattr(self, 'is_moe', False)
+        _compat_qwen3_vl_mixed_data(model.model, processor, is_moe=is_moe)
         return model
 
 
@@ -1077,6 +1101,7 @@ register_model(
 
 
 class Qwen3VLMoeLoader(Qwen3VLLoader):
+    is_moe = True
 
     def get_model(self, model_dir: str, config, processor, model_kwargs) -> PreTrainedModel:
         from transformers import Qwen3VLMoeForConditionalGeneration
@@ -1116,19 +1141,29 @@ class Qwen3_5MoeLoader(Qwen3VLLoader):
 
 register_model(
     ModelMeta(
-        MLLMModelType.qwen3_5_moe, [
+        MLLMModelType.qwen3_5_moe,
+        [
+            ModelGroup(
+                [
+                    Model('Qwen/Qwen3.5-35B-A3B-Base', 'Qwen/Qwen3.5-35B-A3B-Base'),
+                    Model('Qwen/Qwen3.5-35B-A3B', 'Qwen/Qwen3.5-35B-A3B'),
+                    Model('Qwen/Qwen3.5-122B-A10B', 'Qwen/Qwen3.5-122B-A10B'),
+                    Model('Qwen/Qwen3.5-397B-A17B', 'Qwen/Qwen3.5-397B-A17B'),
+                    # FP8
+                    Model('Qwen/Qwen3.5-35B-A3B-FP8', 'Qwen/Qwen3.5-35B-A3B-FP8'),
+                    Model('Qwen/Qwen3.5-122B-A10B-FP8', 'Qwen/Qwen3.5-122B-A10B-FP8'),
+                    Model('Qwen/Qwen3.5-397B-A17B-FP8', 'Qwen/Qwen3.5-397B-A17B-FP8'),
+                ],
+                TemplateType.qwen3_5),
             ModelGroup([
-                Model('Qwen/Qwen3.5-35B-A3B', 'Qwen/Qwen3.5-35B-A3B'),
-                Model('Qwen/Qwen3.5-35B-A3B-Base', 'Qwen/Qwen3.5-35B-A3B-Base'),
-                Model('Qwen/Qwen3.5-122B-A10B', 'Qwen/Qwen3.5-122B-A10B'),
-                Model('Qwen/Qwen3.5-397B-A17B', 'Qwen/Qwen3.5-397B-A17B'),
-                Model('Qwen/Qwen3.5-397B-A17B-FP8', 'Qwen/Qwen3.5-397B-A17B-FP8'),
+                Model('Qwen/Qwen3.6-35B-A3B', 'Qwen/Qwen3.6-35B-A3B'),
+                Model('Qwen/Qwen3.6-35B-A3B-FP8', 'Qwen/Qwen3.6-35B-A3B-FP8'),
             ], TemplateType.qwen3_5),
         ],
         Qwen3_5MoeLoader,
         model_arch=ModelArch.qwen2_vl,
         architectures=['Qwen3_5MoeForConditionalGeneration'],
-        requires=['transformers>=5.2.0.dev', 'qwen_vl_utils>=0.0.14', 'decord'],
+        requires=['transformers>=5.2.0', 'qwen_vl_utils>=0.0.14', 'decord'],
         tags=['vision', 'video']))
 
 
@@ -1142,10 +1177,24 @@ class Qwen3_5Loader(Qwen3VLLoader):
 
 register_model(
     ModelMeta(
-        MLLMModelType.qwen3_5, [
-            ModelGroup([
-                Model('Qwen/Qwen3.5-27B', 'Qwen/Qwen3.5-27B'),
-            ], TemplateType.qwen3_5),
+        MLLMModelType.qwen3_5,
+        [
+            ModelGroup(
+                [
+                    Model('Qwen/Qwen3.5-0.8B', 'Qwen/Qwen3.5-0.8B'),
+                    Model('Qwen/Qwen3.5-2B', 'Qwen/Qwen3.5-2B'),
+                    Model('Qwen/Qwen3.5-4B', 'Qwen/Qwen3.5-4B'),
+                    Model('Qwen/Qwen3.5-9B', 'Qwen/Qwen3.5-9B'),
+                    Model('Qwen/Qwen3.5-27B', 'Qwen/Qwen3.5-27B'),
+                    # FP8
+                    Model('Qwen/Qwen3.5-27B-FP8', 'Qwen/Qwen3.5-27B-FP8'),
+                    # base
+                    Model('Qwen/Qwen3.5-0.8B-Base', 'Qwen/Qwen3.5-0.8B-Base'),
+                    Model('Qwen/Qwen3.5-2B-Base', 'Qwen/Qwen3.5-2B-Base'),
+                    Model('Qwen/Qwen3.5-4B-Base', 'Qwen/Qwen3.5-4B-Base'),
+                    Model('Qwen/Qwen3.5-9B-Base', 'Qwen/Qwen3.5-9B-Base'),
+                ],
+                TemplateType.qwen3_5),
         ],
         Qwen3_5Loader,
         model_arch=ModelArch.qwen2_vl,
@@ -1156,9 +1205,19 @@ register_model(
 
 class Qwen2_5OmniLoader(ModelLoader):
 
+    def _check_qwen_omni_utils(self):
+        try:
+            qwen_omni_utils_version = importlib.metadata.version('qwen_omni_utils')
+        except importlib.metadata.PackageNotFoundError:
+            raise importlib.metadata.PackageNotFoundError(
+                "The 'qwen_omni_utils' distribution was not found and is required by this application.")
+        if version.parse(qwen_omni_utils_version) >= version.parse('0.0.9'):
+            compat_qwen_vl_utils(image_patch_size=14)
+
     def get_config(self, model_dir):
         from transformers import Qwen2_5OmniConfig
-        self.autoconfig_class = Qwen2_5OmniConfig
+        self._check_qwen_omni_utils()
+        self.auto_config_cls = Qwen2_5OmniConfig
         enable_audio_output = get_env_args('ENABLE_AUDIO_OUTPUT', bool, None)
         config = super().get_config(model_dir)
         if enable_audio_output is not None:
@@ -1360,9 +1419,14 @@ def _compat_qwen3_omni_mixed_data(model, processor):
 
 class Qwen3OmniLoader(ModelLoader):
 
+    def _check_qwen_omni_utils(self):
+        require_version('qwen_omni_utils>=0.0.9')
+        compat_qwen_vl_utils(image_patch_size=16)
+
     def get_config(self, model_dir: str):
         from transformers import Qwen3OmniMoeConfig
-        self.autoconfig_class = Qwen3OmniMoeConfig
+        self._check_qwen_omni_utils()
+        self.auto_config_cls = Qwen3OmniMoeConfig
         config = super().get_config(model_dir)
         enable_audio_output = get_env_args('ENABLE_AUDIO_OUTPUT', bool, None)
         if enable_audio_output is not None:
@@ -1405,8 +1469,39 @@ register_model(
         Qwen3OmniLoader,
         model_arch=ModelArch.qwen3_omni,
         architectures=['Qwen3OmniMoeForConditionalGeneration'],
-        requires=['transformers>=4.57.dev0', 'soundfile', 'decord', 'qwen_omni_utils'],
+        requires=['transformers>=4.57.dev0', 'soundfile', 'decord', 'qwen_omni_utils>=0.0.9'],
         tags=['vision', 'video', 'audio'],
+    ))
+
+
+class Qwen3ASRLoader(ModelLoader):
+
+    def get_config(self, model_dir: str):
+        import qwen_asr
+        return super().get_config(model_dir)
+
+    def get_model(self, model_dir: str, config, processor, model_kwargs) -> PreTrainedModel:
+        from transformers import AutoModel
+        self.auto_model_cls = self.auto_model_cls or AutoModel
+        model = super().get_model(model_dir, config, processor, model_kwargs)
+        use_submodel_func(model, 'thinker')
+        return model
+
+
+register_model(
+    ModelMeta(
+        MLLMModelType.qwen3_asr,
+        [
+            ModelGroup([
+                Model('Qwen/Qwen3-ASR-1.7B', 'Qwen/Qwen3-ASR-1.7B'),
+                Model('Qwen/Qwen3-ASR-0.6B', 'Qwen/Qwen3-ASR-0.6B'),
+            ], TemplateType.qwen3_asr)
+        ],
+        Qwen3ASRLoader,
+        model_arch=ModelArch.qwen3_asr,
+        architectures=['Qwen3ASRForConditionalGeneration'],
+        requires=['qwen-asr', 'transformers==4.57.6'],
+        tags=['audio'],
     ))
 
 
@@ -1617,6 +1712,7 @@ register_model(
             ]),
         ],
         template=TemplateType.qwen3_emb,
+        mcore_model_type='qwen3_emb',
         additional_saved_files=['config_sentence_transformers.json', '1_Pooling', 'modules.json'],
         architectures=['Qwen3ForCausalLM']))
 
@@ -1631,6 +1727,7 @@ register_model(
             ]),
         ],
         template=TemplateType.qwen3_reranker,
+        mcore_model_type='gpt',
         architectures=['Qwen3ForCausalLM'],
     ))
 
@@ -1655,6 +1752,7 @@ register_model(
         Qwen3VLEmbLoader,
         template=TemplateType.qwen3_vl_emb,
         model_arch=ModelArch.qwen3_vl,
+        mcore_model_type='qwen3_vl',
         architectures=['Qwen3VLForConditionalGeneration'],
         requires=['transformers>=4.57', 'qwen_vl_utils>=0.0.14', 'decord'],
         tags=['vision', 'video']))
@@ -1680,6 +1778,7 @@ register_model(
         Qwen3VLRerankerLoader,
         template=TemplateType.qwen3_vl_reranker,
         model_arch=ModelArch.qwen3_vl,
+        mcore_model_type='qwen3_vl',
         architectures=['Qwen3VLForConditionalGeneration'],
         requires=['transformers>=4.57', 'qwen_vl_utils>=0.0.14', 'decord'],
         tags=['vision', 'video']))
