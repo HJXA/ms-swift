@@ -23,7 +23,7 @@ swift pt \
   --swanlab_token WODn49OiskSyv0qBnFZcL \
   --swanlab_project CoE_PT_Main_Llama_Evolm \
   --save_steps 500 \
-  --max_steps 664062 \
+  --max_steps 350000 \
   --num_train_epochs 1 \
   --lr_scheduler_type cosine_with_min_lr \
   --lr_scheduler_kwargs '{"min_lr_rate": 0.1}' \
