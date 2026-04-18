@@ -1,5 +1,6 @@
 # coding=utf-8
 import os
+os.environ["CUDA_VISIBLE_DEVICES"] = "0" 
 import gc
 import torch
 from transformers import AutoTokenizer
@@ -10,7 +11,7 @@ SAVE_ROOT = "./checkpoints/coe_pt_init_models"
 os.makedirs(SAVE_ROOT, exist_ok=True)
 
 # tokenizer 只加载一次
-tokenizer = AutoTokenizer.from_pretrained("checkpoints/MiniMind2",model_max_length=2048)
+tokenizer = AutoTokenizer.from_pretrained("checkpoints/llama-2-7b",model_max_length=2048)
 
 
 
@@ -59,18 +60,11 @@ def build_save_one(name, cfg):
     print(f"\n===== Building {name} =====")
 
     config = LlamaConfig(
-        vocab_size=6400,
         hidden_size=cfg["hidden_size"],
         intermediate_size=cfg["intermediate_size"],
         num_hidden_layers=cfg["num_hidden_layers"],
         num_attention_heads=cfg["num_attention_heads"],
         num_key_value_heads=cfg["num_key_value_heads"],
-        tie_word_embeddings=True,
-        max_position_embeddings=32768,
-        pad_token_id=0,
-        rms_norm_eps=1e-5,
-        rope_parameters={"rope_theta": 1000000.0},
-        use_cache=False,
     )
 
     model = LlamaForCausalLM(config)
@@ -102,7 +96,7 @@ def build_save_one(name, cfg):
 
     print("-" * 60)
 
-    save_path = os.path.join(SAVE_ROOT, f"Llama_vocab_6_{name}")
+    save_path = os.path.join(SAVE_ROOT, f"Llama_{name}")
     os.makedirs(save_path, exist_ok=True)
 
     model.save_pretrained(save_path)
@@ -119,14 +113,10 @@ def build_save_one(name, cfg):
 
 
 # 依次构建（一个一个来） 
-MODEL_SIZES = [ 
-                # ("5M", dict(hidden_size=256, num_hidden_layers=5, num_attention_heads=8, num_key_value_heads=2, intermediate_size=682)),
-            #    ("14M", dict(hidden_size=512, num_hidden_layers=5, num_attention_heads=8, num_key_value_heads=2, intermediate_size=1024)), 
-            #    ("25M", dict(hidden_size=512, num_hidden_layers=8, num_attention_heads=8, num_key_value_heads=2, intermediate_size=1365)), 
-            #    ("55M", dict(hidden_size=768, num_hidden_layers=8, num_attention_heads=8, num_key_value_heads=2, intermediate_size=2048)), 
-               ("104M", dict(hidden_size=768, num_hidden_layers=16, num_attention_heads=8, num_key_value_heads=2, intermediate_size=2048, vocab_size=6)), 
-            #    ("0.5B", dict(hidden_size=1536, num_hidden_layers=20, num_attention_heads=16, num_key_value_heads=8, intermediate_size=4096)), 
-            #    ("1B", dict(hidden_size=1536, num_hidden_layers=32, num_attention_heads=16, num_key_value_heads=8, intermediate_size=6144)), 
+MODEL_SIZES = [
+               ("0.5B", dict(hidden_size=1536, num_hidden_layers=20, num_attention_heads=32, num_key_value_heads=4, intermediate_size=3216)),
+               ("1B",   dict(hidden_size=2048, num_hidden_layers=22, num_attention_heads=32, num_key_value_heads=4, intermediate_size=4896)),
+               ("4B",   dict(hidden_size=4096, num_hidden_layers=28, num_attention_heads=32, num_key_value_heads=4, intermediate_size=7792)),
             ]
 
 for name, cfg in MODEL_SIZES:
