@@ -1,49 +1,47 @@
 # 环境变量（不要用 \ 拆）
-export MASTER_PORT=29401
-# export TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD=true
-
+export MASTER_PORT=29508
 export PATH="/ruilab/jxhe/miniconda3/envs/swift/bin:$PATH"
-export NPROC_PER_NODE=1
-export CUDA_VISIBLE_DEVICES=0
-
+export NPROC_PER_NODE=4
+export CUDA_VISIBLE_DEVICES=0,1,2,3
 export NCCL_P2P_LEVEL=NVL
 
-export HF_ENDPOINT=https://hf-mirror.com
+# export SWANLAB_RESUME=True
+# export SWANLAB_RUN_ID=<exp_id>
 
 # 统一设置输出路径
-export OUTPUT_DIR="/ruilab/jxhe/CoE_Monitor/ms-swift/output/test/PT_HJXA_Llama_5M"
-# --resume_from_checkpoint /ruilab/jxhe/CoE_Monitor/ms-swift/output/PT_HJXA_Llama_5M/v0-20260315-153950/checkpoint-90000 \
+export OUTPUT_DIR="/ruilab2/hjxa/ms-swift/output/test/PT_LLaMA_0.5B"
 # 确保目录存在
 mkdir -p $OUTPUT_DIR
 # 启动训练
 swift pt \
-  --model /ruilab/jxhe/CoE_Monitor/checkpoints/coe_pt_init_models/Llama_5M \
-  --packing false \
+  --model /ruilab/jxhe/CoE_Monitor/checkpoints/PT_Init_Models/Llama_0.5B \
+  --packing true \
   --packing_num_proc 32 \
-  --padding_free false \
+  --padding_free true \
   --report_to swanlab \
   --truncation_strategy right \
   --swanlab_token WODn49OiskSyv0qBnFZcL \
-  --swanlab_project test \
-  --save_steps 1000000 \
-  --max_steps 5 \
-  --lr_scheduler_type warmup_stable_decay \
-  --lr_scheduler_kwargs '{"num_decay_steps":0}' \
-  --warmup_steps 2000 \
+  --swanlab_project CoE_PT_Main_Llama_Evolm \
+  --save_steps 5 \
+  --max_steps 100 \
+  --lr_scheduler_type cosine_with_min_lr \
+  --lr_scheduler_kwargs '{"min_lr_rate": 0.1}' \
   --cached_dataset /ruilab/jxhe/CoE_Monitor/data/LLM/PT/c4-subsets_cached/train \
-  --use_hf true \
   --load_from_cache_file true \
   --split_dataset_ratio 0 \
   --tuner_type full \
   --torch_dtype bfloat16 \
-  --per_device_train_batch_size 4 \
+  --per_device_train_batch_size 128 \
   --attn_impl flash_attention_2 \
-  --learning_rate 1e-3 \
+  --learning_rate 2e-4 \
+  --adam_beta1 0.9 \
+  --adam_beta2 0.95 \
+  --max_grad_norm 1 \
   --gradient_checkpointing true \
-  --ddp_find_unused_parameters true \
-  --weight_decay 0.0 \
+  --gradient_accumulation_steps 1 \
+  --weight_decay 0.1 \
   --logging_steps 1 \
-  --max_length 64 \
+  --max_length 2048 \
   --output_dir $OUTPUT_DIR \
   --dataset_num_proc 4 \
   --dataloader_num_workers 4 \
@@ -54,14 +52,10 @@ swift pt \
   --use_liger_kernel true \
   2>&1 | tee $OUTPUT_DIR/train.log
 
-# 128 * 4
-
 #   --dataset local_fineweb \
-#    \
+#   --columns '{"text":"content"}' \
 #   --streaming true \ AssertionError: Cached dataset does not support streaming
 #   --device_map /ruilab/jxhe/CoE_Monitor/ms-swift/HJXA/Custom_Model/fix_zero3/llama_25m.json \
-
-# dataset_num_proc
 
 # device_map: 模型使用的device_map配置，例如：'auto'、'cpu'、json字符串、json文件路径。该参数会透传入transformers的from_pretrained接口。默认为None，根据设备和分布式训练情况自动设置。
 
