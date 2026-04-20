@@ -5,8 +5,8 @@ export NPROC_PER_NODE=4
 export CUDA_VISIBLE_DEVICES=0,1,2,3
 export NCCL_P2P_LEVEL=NVL
 
-# export SWANLAB_RESUME=True
-# export SWANLAB_RUN_ID=<exp_id>
+export SWANLAB_RESUME=True
+export SWANLAB_RUN_ID=pbwjo20fx8ciepj2rzkkc
 
 # 统一设置输出路径
 export OUTPUT_DIR="/ruilab2/hjxa/ms-swift/output/PT_LLaMA_0.5B"
@@ -15,6 +15,7 @@ mkdir -p $OUTPUT_DIR
 # 启动训练
 swift pt \
   --model /ruilab/jxhe/CoE_Monitor/checkpoints/PT_Init_Models/Llama_0.5B \
+  --resume_from_checkpoint /ruilab2/hjxa/ms-swift/output/PT_LLaMA_0.5B/v0-20260418-201325/checkpoint-22500 \
   --packing true \
   --packing_num_proc 16 \
   --padding_free true \
