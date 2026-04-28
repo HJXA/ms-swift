@@ -1,5 +1,6 @@
 export HF_ENDPOINT=https://hf-mirror.com
 export HF_HOME=/ruilab2/hjxa/.cache/huggingface # 指定cache位置
+export PATH="/ruilab/jxhe/miniconda3/envs/swift/bin:$PATH"
 
 # 禁用 tokenizer 多线程（最关键）
 export TOKENIZERS_PARALLELISM=false
