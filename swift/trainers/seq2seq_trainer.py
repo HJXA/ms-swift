@@ -25,7 +25,8 @@ from .utils import per_token_loss_func, per_token_loss_func_sp
 logger = get_logger()
 
 
-class Seq2SeqTrainer_Swift(SwiftMixin, DataLoaderMixin, HfSeq2SeqTrainer):
+# class Seq2SeqTrainer_Swift(SwiftMixin, DataLoaderMixin, HfSeq2SeqTrainer):
+class Seq2SeqTrainer(SwiftMixin, DataLoaderMixin, HfSeq2SeqTrainer):
     args: Seq2SeqTrainingArguments
 
     def __init__(self, *args, **kwargs):
@@ -238,7 +239,7 @@ class Seq2SeqTrainer_Swift(SwiftMixin, DataLoaderMixin, HfSeq2SeqTrainer):
             return super().training_step(model, inputs, *args, **kwargs)
 
 
-import sys
-sys.path.append("/ruilab/jxhe/CoE_Monitor/ms-swift")
+# import sys
+# sys.path.append("/ruilab/jxhe/CoE_Monitor/ms-swift")
 
-from HJXA.Trainer.CoE_Trainer import CoETrainer as Seq2SeqTrainer
+# from HJXA.Trainer.CoE_Trainer import CoETrainer as Seq2SeqTrainer
