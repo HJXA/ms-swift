@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-export PATH="/ruilab/jxhe/miniconda3/envs/swift/bin:$PATH"
 export NPROC_PER_NODE=1
 export CUDA_VISIBLE_DEVICES=2
 export NCCL_P2P_LEVEL=NVL

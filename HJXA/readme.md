@@ -1,1 +1,0 @@
-export PATH="/ruilab/jxhe/miniconda3/envs/msswift/bin:$PATH"
