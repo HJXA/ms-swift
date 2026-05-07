@@ -18,9 +18,6 @@ swift rlhf \
     --vllm_gpu_memory_utilization 0.4 \
     --vllm_tensor_parallel_size 1 \
     --vllm_max_model_len 8192 \
-    --sleep_level 1 \
-    --offload_model true \
-    --offload_optimizer true \
     --tuner_type full \
     --torch_dtype bfloat16 \
     --dataset /Users/hjxa/local_code/Pedia_clinical_agent/train/datasets/grpo/train_dataset.jsonl \
@@ -72,7 +69,7 @@ swift rlhf \
 # --external_plugins: 外部插件路径，用于注册自定义 reward function。
 # --reward_funcs: 使用的 reward function 名称；ped_diagnosis_match 在 ped_reward.py 中注册。
 # --use_vllm: 使用 vLLM 加速 GRPO rollout 采样。
-# --vllm_mode: vLLM 部署模式；colocate 表示训练和采样服务共用同一张 GPU。
+# --vllm_mode: vLLM 部署模式；colocate 表示使用LLM启动而非server
 # --vllm_gpu_memory_utilization: vLLM 可占用的单卡显存比例，降低可减少 OOM 风险。
 # --vllm_tensor_parallel_size: vLLM 推理张量并行大小；单卡设置为 1。
 # --vllm_max_model_len: vLLM 推理侧最大上下文长度。

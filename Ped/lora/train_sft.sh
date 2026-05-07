@@ -1,13 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-export PATH="/ruilab/jxhe/miniconda3/envs/swift/bin:$PATH"
-export NPROC_PER_NODE=1
-export CUDA_VISIBLE_DEVICES=4
+export NPROC_PER_NODE=4
+export CUDA_VISIBLE_DEVICES=4,5,6,7
 export NCCL_P2P_LEVEL=NVL
 export HF_ENDPOINT=https://hf-mirror.com
 
-OUTPUT_DIR=/ruilab/jxhe/Ped/output/lora
+OUTPUT_DIR=/ruilab/jxhe/Ped/output/lora/sft/Qwen3_0.6B_sft_thinking
 
 # model
 # dataset
@@ -20,7 +19,7 @@ OUTPUT_DIR=/ruilab/jxhe/Ped/output/lora
 # deepspeed
 
 swift sft \
-    --model /ruilab2/hjxa/checkpoints/qwen/Qwen3/4B/Qwen3-4B \
+    --model /ruilab2/hjxa/checkpoints/qwen/Qwen3/0.6B/Qwen3-0.6B \
     --tuner_type lora \
     --dataset /ruilab/jxhe/Ped/Pedia_clinical_agent/train/datasets/sft_thinking/train_dataset.jsonl \
     --load_from_cache_file true \

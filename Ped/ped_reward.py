@@ -8,7 +8,7 @@ from typing import Any, Optional
 # ORM 是 ms-swift 的 Outcome Reward Model 基类；orms 是 reward 注册表。
 from swift.rewards import ORM, orms
 
-from .reward_utils import *
+from reward_utils import *
 
 
 # 预测列表的位置权重：越靠前的预测诊断权重越高。

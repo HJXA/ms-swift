@@ -1,19 +1,21 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-export NPROC_PER_NODE=1
-export CUDA_VISIBLE_DEVICES=2
+export NPROC_PER_NODE=4
+export CUDA_VISIBLE_DEVICES=4,5,6,7
 export NCCL_P2P_LEVEL=NVL
 export HF_ENDPOINT=https://hf-mirror.com
+
+OUTPUT_DIR=/ruilab/jxhe/Ped/output/lora/grpo/Qwen3_4B_sft_thinking_grpo_thinking
 
 PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
 swift rlhf \
     --rlhf_type grpo \
-    --model Qwen/Qwen3-8B \
+    --model /ruilab2/hjxa/checkpoints/qwen/Qwen3/0.6B/Qwen3-0.6B \
     --use_hf true \
-    --adapters /Users/hjxa/local_code/Pedia_clinical_agent/train/ms-swift/Ped/lora/sft/checkpoint-xxx \
-    --ref_adapters /Users/hjxa/local_code/Pedia_clinical_agent/train/ms-swift/Ped/lora/sft/checkpoint-xxx \
-    --external_plugins /Users/hjxa/local_code/Pedia_clinical_agent/train/ms-swift/Ped/ped_reward.py \
+    --adapters /ruilab/jxhe/Ped/output/lora/sft/Qwen3_0.6B_sft_thinking/v0-20260507-205341/checkpoint-30 \
+    --ref_adapters /ruilab/jxhe/Ped/output/lora/sft/Qwen3_0.6B_sft_thinking/v0-20260507-205341/checkpoint-30 \
+    --external_plugins /ruilab/jxhe/Ped/Pedia_clinical_agent/train/ms-swift/Ped/ped_reward.py \
     --reward_funcs ped_diagnosis_match \
     --use_vllm true \
     --vllm_mode colocate \
@@ -22,21 +24,19 @@ swift rlhf \
     --vllm_max_model_len 8192 \
     --vllm_enable_lora true \
     --vllm_max_lora_rank 8 \
-    --sleep_level 1 \
-    --offload_model true \
-    --offload_optimizer true \
     --tuner_type lora \
     --torch_dtype bfloat16 \
-    --dataset /Users/hjxa/local_code/Pedia_clinical_agent/train/datasets/grpo/train_dataset.jsonl \
+    --dataset /ruilab/jxhe/Ped/Pedia_clinical_agent/train/datasets/grpo_thinking/train_dataset.jsonl \
     --load_from_cache_file true \
     --split_dataset_ratio 0 \
     --max_length 4096 \
     --max_completion_length 1024 \
-    --num_train_epochs 1 \
-    --per_device_train_batch_size 2 \
+    --num_train_epochs 5 \
+    --max_steps 30 \
+    --per_device_train_batch_size 1 \
     --learning_rate 1e-6 \
     --lr_scheduler_type cosine \
-    --warmup_ratio 0.05 \
+    --warmup_ratio 0.1 \
     --gradient_accumulation_steps 1 \
     --gradient_checkpointing true \
     --weight_decay 0.0 \
@@ -44,16 +44,16 @@ swift rlhf \
     --lora_alpha 32 \
     --target_modules all-linear \
     --save_steps 50 \
-    --save_total_limit 3 \
     --logging_steps 1 \
-    --output_dir /Users/hjxa/local_code/Pedia_clinical_agent/train/ms-swift/Ped/lora/grpo \
-    --truncation_strategy right \
+    --output_dir $OUTPUT_DIR \
+    --truncation_strategy delete \
     --attn_impl flash_attention_2 \
     --dataloader_num_workers 4 \
     --dataset_num_proc 4 \
     --dataset_shuffle true \
     --train_dataloader_shuffle true \
-    --num_generations 2 \
+    --generation_batch_size 8 \
+    --num_generations 8 \
     --temperature 1.0 \
     --top_p 0.85 \
     --top_k 50 \
@@ -62,9 +62,11 @@ swift rlhf \
     --log_completions true \
     --num_iterations 1 \
     --beta 0.04 \
-    --save_only_model true \
+    --save_only_model false \
     --report_to swanlab \
-    --swanlab_project Ped
+    --swanlab_project Ped \
+    --swanlab_token WODn49OiskSyv0qBnFZcL \
+    --overlong_filter true \
 
 # 参数说明：
 # PATH: 指定优先使用的 swift Conda 环境。
