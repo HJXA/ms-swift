@@ -28,8 +28,8 @@ swift rlhf \
     --split_dataset_ratio 0 \
     --max_length 4096 \
     --max_completion_length 1024 \
-    --num_train_epochs 5 \
-    --max_steps 30 \
+    --num_train_epochs 100 \
+    --max_steps 600 \
     --per_device_train_batch_size 1 \
     --learning_rate 1e-6 \
     --lr_scheduler_type cosine \
@@ -37,7 +37,7 @@ swift rlhf \
     --gradient_accumulation_steps 1 \
     --gradient_checkpointing true \
     --weight_decay 0.0 \
-    --save_steps 50 \
+    --save_steps 100 \
     --logging_steps 1 \
     --output_dir $OUTPUT_DIR \
     --truncation_strategy delete \
