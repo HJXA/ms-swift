@@ -6,7 +6,7 @@ export CUDA_VISIBLE_DEVICES=4,5,6,7
 export NCCL_P2P_LEVEL=NVL
 export HF_ENDPOINT=https://hf-mirror.com
 
-OUTPUT_DIR=/ruilab/jxhe/Ped/output/lora/sft/Qwen3_0.6B_sft_thinking
+OUTPUT_DIR=/ruilab/jxhe/Ped/output/lora/sft/Qwen3_14B_sft_thinking
 
 # model
 # dataset
@@ -19,7 +19,7 @@ OUTPUT_DIR=/ruilab/jxhe/Ped/output/lora/sft/Qwen3_0.6B_sft_thinking
 # deepspeed
 
 swift sft \
-    --model /ruilab2/hjxa/checkpoints/qwen/Qwen3/0.6B/Qwen3-0.6B \
+    --model /ruilab2/hjxa/checkpoints/qwen/Qwen3/14B/Qwen3-14B \
     --tuner_type lora \
     --dataset /ruilab/jxhe/Ped/Pedia_clinical_agent/train/datasets/sft_thinking/train_dataset.jsonl \
     --load_from_cache_file true \
@@ -27,7 +27,7 @@ swift sft \
     --torch_dtype bfloat16 \
     --num_train_epochs 5 \
     --max_steps 30 \
-    --per_device_train_batch_size 1 \
+    --per_device_train_batch_size 32 \
     --learning_rate 1e-5 \
     --lr_scheduler_type cosine \
     --warmup_ratio 0.1 \
