@@ -195,9 +195,10 @@ class PedDiagnosisMatchReward(ORM):
 
 
     # 对 batch 中所有需要 LLM judge 且未缓存的 pair 一次性并发预取。
-    def _prefetch_matches(self, pairs: list[tuple[str, str]]) -> None:
+    def _prefetch_matches(self, pairs: list[tuple[str, str]]) -> tuple[int, int]:
         # 每个 batch 只从 SQLite 同步当前 batch 需要的 keys，避免随着 cache 增大反复全量 IO。
         self.judge._load_cache(pairs)
+        cache_hit_count = 0
         pending: dict[tuple[str, str], tuple[str, str]] = {}
         for pred, gold in pairs:
             if not pred or not gold or pred == gold:
@@ -207,9 +208,13 @@ class PedDiagnosisMatchReward(ORM):
                 if self._match_cache.get(key) is None:
                 # pending 只收集本进程当前内存仍未命中的 pair，后续才会调用耗时的 LLM judge。
                     pending.setdefault(key, (pred, gold))
+                else:
+                    cache_hit_count += 1
+
+        llm_count = len(pending)
 
         if not pending:
-            return
+            return cache_hit_count, llm_count
 
         new_rows: list[tuple[str, str, bool]] = []
         with ThreadPoolExecutor(max_workers=min(self.max_workers, len(pending))) as executor:
@@ -228,7 +233,7 @@ class PedDiagnosisMatchReward(ORM):
                 pred, gold = key
                 pred = pred.strip()
                 gold = gold.strip()
-                # 新 judge 结果先写本进程临时索引，再 append 双向两行到共享 txt 供其他进程 reload。
+
                 with self._cache_lock:
                     self._match_cache[(pred, gold)] = match
                     self._match_cache[(gold, pred)] = match
@@ -236,6 +241,7 @@ class PedDiagnosisMatchReward(ORM):
 
         # 一个 batch 的新增 judge 结果统一提交一次
         self.judge._write_cache(new_rows)
+        return cache_hit_count, llm_count
 
     # 计算一组已解析 pred/gold 诊断列表的奖励。
     def _score_names(self, pred: list[str], gold: list[str]) -> float:
@@ -288,8 +294,11 @@ class PedDiagnosisMatchReward(ORM):
                 for gold_name in gold:
                     pairs.append((pred_name, gold_name))
         prefetch_start = time.perf_counter()
-        self._prefetch_matches(pairs)
-        print(f"[ped_reward] prefetch_elapsed={time.perf_counter() - prefetch_start:.3f}s pairs={len(pairs)}")
+        cache_hit_count, llm_count = self._prefetch_matches(pairs)
+        print(
+            f"[ped_reward] prefetch_elapsed={time.perf_counter() - prefetch_start:.3f}s "
+            f"pairs={len(pairs)} cache_hit={cache_hit_count} llm={llm_count}"
+        )
         # 对 batch 中每条 completion/solution 计算奖励并返回 float 列表。
         rewards = [self._score_names(pred, gold) for pred, gold in parsed]
         return rewards
