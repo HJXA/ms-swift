@@ -254,8 +254,8 @@ def get_model(model_id: str = 'glm-5.1', extra_body: Dict[str, Any] = {}):
 disease_match_judge_agent = Agent(
     name="病名匹配裁判Agent",
     model=get_model(
-        model_id=os.getenv("JUDGE_MODEL", "qwen/qwen3.6-plus"),
-        extra_body={"reasoning": {"enabled": True, "effort": "high"}},
+        model_id=os.getenv("JUDGE_MODEL", "deepseek/deepseek-v4-flash"),
+        extra_body={"reasoning": {"enabled": False, "effort": "high"}},
     ),
     instructions=JUDGE_SYSTEM_PROMPT,
     telemetry=False,

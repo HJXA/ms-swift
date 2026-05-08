@@ -1,8 +1,9 @@
 # 开启 postponed evaluation of annotations，避免运行期立即解析所有类型注解。
 from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import closing
 import json
-import os
+import sqlite3
 import threading
 import time
 from pathlib import Path
@@ -11,9 +12,6 @@ from typing import Any, Optional
 from swift.rewards import ORM, orms
 
 from reward_utils import *
-
-
-import fcntl
 
 
 # 预测列表的位置权重：越靠前的预测诊断权重越高。
@@ -26,8 +24,8 @@ MAX_PREDICTIONS = 5
 JUDGE_MAX_RETRIES = 5
 # agent judge 默认最大并发数。
 MAX_WORKERS = 128
-# 持久化 cache 路径：多进程共享同一个 txt JSONL 文件；需要改路径时只改这个变量。
-CACHE_PATH = Path("/ruilab/jxhe/Ped/output/reward_cache/disease_match_cache.txt")
+# 持久化 cache 路径：多进程共享同一个 SQLite 文件；需要改路径时只改这个变量。
+CACHE_PATH = Path("/ruilab/jxhe/Ped/output/reward_cache/disease_match_cache.sqlite3")
 
 
 
@@ -41,61 +39,77 @@ class DiseaseNameJudge:
         self.cache = cache
         self.cache_lock = cache_lock
         self.cache_path = CACHE_PATH
-        # 初始化时先全量加载历史 cache，复用之前训练保存的 judge 结果。
-        self._load_cache()
+        self._initialize_cache()
 
-    def _load_cache(self) -> None:
-        if not self.cache_path.is_file():
-            return
-        # 全量读取共享 txt，把其他进程已经落盘的结果同步到本进程内存索引。
-        with self.cache_path.open("r", encoding="utf-8") as f:
-            # 共享锁：允许多个进程同时读，但会等待正在写入的进程释放独占锁。
-            if fcntl is not None:
-                fcntl.flock(f.fileno(), fcntl.LOCK_SH)
-            try:
-                for line_no, line in enumerate(f, start=1):
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        row = json.loads(line)
-                    except json.JSONDecodeError:
-                        print(f"[ped_reward] skip invalid cache line: {self.cache_path}:{line_no}")
-                        continue
-                    pred = str(row.get("pred", "")).strip()
-                    gold = str(row.get("gold", "")).strip()
-                    match = self._parse_match_value(row.get("match"))
-                    if not pred or not gold or match is None:
-                        continue
-                    with self.cache_lock:
-                        # txt 已经按双向两行写入，这里只按文件中的单行方向恢复即可。
-                        self.cache[(pred, gold)] = match
-            finally:
-                if fcntl is not None:
-                    fcntl.flock(f.fileno(), fcntl.LOCK_UN)
-
-    def _write_cache(self, pred: str, gold: str, match: bool) -> None:
+    def _connect_cache(self) -> sqlite3.Connection:
         self.cache_path.parent.mkdir(parents=True, exist_ok=True)
-        pred = pred.strip()
-        gold = gold.strip()
-        # 直接持久化双向结果；读取后按普通 (pred, gold) key 查询即可，不需要反向查找逻辑。
-        rows = [
-            {"pred": pred, "gold": gold, "match": match},
-            {"pred": gold, "gold": pred, "match": match},
-        ]
-        with self.cache_path.open("a", encoding="utf-8") as f:
-            # 独占锁：避免多进程同时 append 时两行 JSONL 交错写坏。
-            if fcntl is not None:
-                fcntl.flock(f.fileno(), fcntl.LOCK_EX)
-            try:
-                for row in rows:
-                    f.write(json.dumps(row, ensure_ascii=False, separators=(",", ":")) + "\n")
-                f.flush()
-                # 训练中 LLM judge 很慢，fsync 的 IO 成本相对很小；尽快落盘便于其他进程下一步 reload。
-                os.fsync(f.fileno())
-            finally:
-                if fcntl is not None:
-                    fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+        conn = sqlite3.connect(str(self.cache_path), timeout=30)
+        # 多进程同时访问时，遇到短暂写锁最多等待 30s，避免立即报 database is locked。
+        conn.execute("PRAGMA busy_timeout=30000")
+        # NORMAL 比 FULL 少一些同步开销；WAL 模式下通常足够保证训练 cache 的可靠性。
+        conn.execute("PRAGMA synchronous=NORMAL")
+        return conn
+
+    def _initialize_cache(self) -> None:
+        with closing(self._connect_cache()) as conn:
+            # WAL 允许读写并发：一个进程写入时，其他进程仍可读已提交的数据。
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA synchronous=NORMAL")
+            # 训练程序只负责读写 SQLite；旧 txt 迁移请单独运行 Ped/migrate_reward_cache.py。
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS disease_match_cache (
+                    pred TEXT NOT NULL,
+                    gold TEXT NOT NULL,
+                    match INTEGER NOT NULL,
+                    PRIMARY KEY (pred, gold)
+                )
+                """
+            )
+            conn.commit()
+
+    def _load_cache(self, pairs: list[tuple[str, str]]) -> None:
+        # 每个 batch 只同步当前 batch 需要的 keys，避免 cache 越大时反复全量扫描。
+        keys = list(dict.fromkeys((pred.strip(), gold.strip()) for pred, gold in pairs if pred and gold))
+        if not keys:
+            return
+        with closing(self._connect_cache()) as conn:
+            for pred, gold in keys:
+                row = conn.execute(
+                    "SELECT match FROM disease_match_cache WHERE pred = ? AND gold = ?",
+                    (pred, gold),
+                ).fetchone()
+                if row is None:
+                    continue
+                with self.cache_lock:
+                    self.cache[(pred, gold)] = bool(row[0])
+
+    def _write_cache(self, rows: list[tuple[str, str, bool]]) -> None:
+        # rows 是当前 batch 新 judge 出来的结果；本函数统一写入并在退出事务时提交。
+        values: list[tuple[str, str, int]] = []
+        for pred, gold, match in rows:
+            pred = pred.strip()
+            gold = gold.strip()
+            if not pred or not gold:
+                continue
+            match_value = int(match)
+            # 直接持久化双向结果；读取后按普通 (pred, gold) key 查询即可，不需要反向查找逻辑。
+            values.append((pred, gold, match_value))
+            values.append((gold, pred, match_value))
+
+        if not values:
+            return
+
+        with closing(self._connect_cache()) as conn:
+            # with conn 会开启一个事务；executemany 全部成功后在代码块结束时自动 commit。
+            with conn:
+                conn.executemany(
+                    """
+                    INSERT OR REPLACE INTO disease_match_cache(pred, gold, match)
+                    VALUES (?, ?, ?)
+                    """,
+                    values,
+                )
 
     @staticmethod
     def _parse_match_value(value: Any) -> Optional[bool]:
@@ -160,7 +174,7 @@ class PedDiagnosisMatchReward(ORM):
     def __init__(self, args=None, **kwargs):
         # 调用 ORM 父类初始化，保持与 ms-swift reward 接口兼容。
         super().__init__(args, **kwargs)
-        # judge 初始化时会加载持久化 cache；多 reward 实例共享类级内存 cache。
+        # judge 初始化时会准备持久化 cache；多 reward 实例共享类级内存 cache。
         self.judge = DiseaseNameJudge(self._match_cache, self._cache_lock)
         self.max_workers = MAX_WORKERS
 
@@ -176,15 +190,14 @@ class PedDiagnosisMatchReward(ORM):
         # 用归一化后的 pair 做缓存 key，减少重复医学等价判定。
         key = (pred, gold)
         # judge 调用只发生在 _prefetch_matches；这里 cache miss 表示该 pair 不参与奖励计算。
-        self.judge._load_cache()
         with self._cache_lock:
             return self._match_cache.get(key)
 
 
     # 对 batch 中所有需要 LLM judge 且未缓存的 pair 一次性并发预取。
     def _prefetch_matches(self, pairs: list[tuple[str, str]]) -> None:
-        # 预取前全量读取一次共享 txt，避免每个 pair 都触发 IO；真正打分的 _match 里仍会再次 load。
-        self.judge._load_cache()
+        # 每个 batch 只从 SQLite 同步当前 batch 需要的 keys，避免随着 cache 增大反复全量 IO。
+        self.judge._load_cache(pairs)
         pending: dict[tuple[str, str], tuple[str, str]] = {}
         for pred, gold in pairs:
             if not pred or not gold or pred == gold:
@@ -198,6 +211,7 @@ class PedDiagnosisMatchReward(ORM):
         if not pending:
             return
 
+        new_rows: list[tuple[str, str, bool]] = []
         with ThreadPoolExecutor(max_workers=min(self.max_workers, len(pending))) as executor:
             future_to_key = {
                 executor.submit(self.judge.is_match, pred, gold): key
@@ -218,7 +232,10 @@ class PedDiagnosisMatchReward(ORM):
                 with self._cache_lock:
                     self._match_cache[(pred, gold)] = match
                     self._match_cache[(gold, pred)] = match
-                self.judge._write_cache(pred, gold, match)
+                new_rows.append((pred, gold, match))
+
+        # 一个 batch 的新增 judge 结果统一提交一次
+        self.judge._write_cache(new_rows)
 
     # 计算一组已解析 pred/gold 诊断列表的奖励。
     def _score_names(self, pred: list[str], gold: list[str]) -> float:
@@ -251,10 +268,11 @@ class PedDiagnosisMatchReward(ORM):
         # coverage_score 表示 gold 中有多少诊断被模型命中。
         coverage_score = len(matched_gold_indices) / len(gold)
         # 按 README 定义混合最佳命中得分和覆盖率得分。
-        reward = 0.8 * best_match_score + 0.2 * coverage_score
+        # reward = 0.8 * best_match_score + 0.2 * coverage_score
+        reward = best_match_score + coverage_score
 
         # 将 reward 裁剪到 [0, 1]，防止异常权重或未来修改造成越界。
-        reward = max(0.0, min(1.0, reward))
+        # reward = max(0.0, min(1.0, reward))
         # 返回单条样本奖励。
         return reward
 
