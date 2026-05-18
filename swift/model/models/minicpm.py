@@ -192,6 +192,31 @@ register_model(
         tags=['vision', 'video'],
     ))
 
+
+class MiniCPMV4_6Loader(ModelLoader):
+
+    def get_model(self, *args, **kwargs) -> PreTrainedModel:
+        from transformers import AutoModelForImageTextToText
+        self.auto_model_cls = self.auto_model_cls or AutoModelForImageTextToText
+        return super().get_model(*args, **kwargs)
+
+
+register_model(
+    ModelMeta(
+        MLLMModelType.minicpmv4_6,
+        [
+            ModelGroup([
+                Model('OpenBMB/MiniCPM-V-4.6', 'openbmb/MiniCPM-V-4.6'),
+            ], ),
+        ],
+        MiniCPMV4_6Loader,
+        template=TemplateType.minicpmv4_6,
+        architectures=['MiniCPMV4_6ForConditionalGeneration'],
+        model_arch=ModelArch.minicpmv4_6,
+        requires=['transformers>=5.7.0'],
+        tags=['vision', 'video'],
+    ))
+
 register_model(
     ModelMeta(
         LLMModelType.minicpm,
