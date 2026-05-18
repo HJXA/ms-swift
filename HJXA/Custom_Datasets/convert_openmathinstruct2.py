@@ -8,8 +8,15 @@ from typing import Any, Dict, Iterable, Iterator, Optional
 #
 # 1. 默认转换 Hugging Face 数据集 nvidia/OpenMathInstruct-2 的 train_1M split，
 #    输出为 ms-swift 标准 messages JSONL 格式：
-#    python HJXA/Custom_Datasets/convert_openmathinstruct2.py \
-#      --output /path/to/openmathinstruct2_msswift.jsonl
+# python HJXA/Custom_Datasets/convert_openmathinstruct2.py \
+#     --split train \
+#     --output /ruilab2/hjxa/data/SFT/OpenMathInstruct-2/openmathinstruct2_train_msswift.jsonl
+
+# python HJXA/Custom_Datasets/convert_openmathinstruct2.py \
+#   --dataset /ruilab2/hjxa/data/SFT/OpenMathInstruct-2/data \
+#   --split train \
+#   --no-streaming \
+#   --output /ruilab2/hjxa/data/SFT/OpenMathInstruct-2-msswift/openmathinstruct2_train_msswift.jsonl
 #
 # 2. 转换完整 train split：
 #    python HJXA/Custom_Datasets/convert_openmathinstruct2.py \

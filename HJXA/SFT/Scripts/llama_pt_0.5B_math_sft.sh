@@ -19,7 +19,7 @@ MODEL_ROOT="/ruilab2/hjxa/checkpoints/pt/llama-0.5B-350B/little_sets"
 OUTPUT_BASE_DIR="/ruilab2/hjxa/ms-swift/output/SFT/llama-0.5B-350B"
 LOG_DIR="/ruilab2/hjxa/ms-swift/logs/SFT/llama-0.5B-350B"
 swanlab_name=$(basename "${OUTPUT_BASE_DIR%/}")
-DATASET="/ruilab2/hjxa/data/SFT/OpenMathInstruct-2-msswift_cached-LLaMA_0.5B/train#100"
+DATASET="/ruilab2/hjxa/data/SFT/OpenMathInstruct-2-msswift_cached-LLaMA_0.5B/train"
 
 mkdir -p "$OUTPUT_BASE_DIR"
 mkdir -p "$LOG_DIR"

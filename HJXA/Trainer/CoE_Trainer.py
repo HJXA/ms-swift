@@ -42,7 +42,7 @@ class CoETrainer(Seq2SeqTrainer_Swift):
     继承自 CustomSeq2SeqTrainer, 用于实现自定义的 CoeLoss。
     只覆盖了 compute_loss 方法，保留了父类的所有初始化和辅助功能。
     """
-    def __init__(self, test_falg = False,CoE_Flag=True, *args, **kwargs):
+    def __init__(self, test_falg = False ,CoE_Flag=True, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
 
@@ -425,9 +425,12 @@ class CoETrainer(Seq2SeqTrainer_Swift):
             print("labels 的形状",labels.shape)
 
             print(f"labels 中 -100 比例",(labels == -100).float().mean())
+            print(f"loss 的值",loss.item())
 
         if not self.CoE_Flag:
             return (loss, outputs) if return_outputs else loss
+
+        
 
 
         current_labels = labels if labels is not None else inputs.get('labels')

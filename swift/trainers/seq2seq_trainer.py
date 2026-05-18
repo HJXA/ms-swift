@@ -27,6 +27,8 @@ logger = get_logger()
 
 class Seq2SeqTrainer_Swift(SwiftMixin, DataLoaderMixin, HfSeq2SeqTrainer):
     args: Seq2SeqTrainingArguments
+# class Seq2SeqTrainer(SwiftMixin, DataLoaderMixin, HfSeq2SeqTrainer):
+    args: Seq2SeqTrainingArguments
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
