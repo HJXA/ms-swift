@@ -4,10 +4,10 @@ set -e
 ############################################
 # 环境变量
 ############################################
-export MASTER_PORT=20001
+export MASTER_PORT=20002
 export PATH="/ruilab/jxhe/miniconda3/envs/swift/bin:$PATH"
 export NPROC_PER_NODE=1
-export CUDA_VISIBLE_DEVICES=1
+export CUDA_VISIBLE_DEVICES=2
 export NCCL_P2P_LEVEL=NVL
 export HF_ENDPOINT=https://hf-mirror.com
 
@@ -60,7 +60,7 @@ swift sft \
   --swanlab_token WODn49OiskSyv0qBnFZcL \
   --swanlab_project $swanlab_name \
   --save_steps 2000 \
-  --max_steps 10000 \
+  --max_steps 1000 \
   --lr_scheduler_type cosine \
   --warmup_steps 2000 \
   --cached_dataset "$DATASET" \
