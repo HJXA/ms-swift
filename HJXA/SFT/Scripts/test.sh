@@ -59,7 +59,7 @@ swift sft \
   --truncation_strategy right \
   --swanlab_token WODn49OiskSyv0qBnFZcL \
   --swanlab_project $swanlab_name \
-  --save_steps 2000 \
+  --save_steps 10000 \
   --max_steps 10000 \
   --lr_scheduler_type cosine \
   --warmup_steps 2000 \

@@ -24,7 +24,7 @@ swift pt \
   --truncation_strategy right \
   --swanlab_token WODn49OiskSyv0qBnFZcL \
   --swanlab_project CoE_PT_Main_Pythia \
-  --save_steps 2000 \
+  --save_steps 10000 \
   --max_steps 48000 \
   --lr_scheduler_type cosine \
   --warmup_steps 1430 \

@@ -16,8 +16,8 @@ export HF_ENDPOINT=https://hf-mirror.com
 ############################################
 MODEL_ROOT="/ruilab2/hjxa/checkpoints/pt/llama-0.5B-350B/little_sets"
 
-OUTPUT_BASE_DIR="/ruilab2/hjxa/ms-swift/output/SFT/llama-0.5B-350B"
-LOG_DIR="/ruilab2/hjxa/ms-swift/logs/SFT/llama-0.5B-350B"
+OUTPUT_BASE_DIR="/ruilab2/hjxa/ms-swift/output/SFT/llama-0.5B-350B-math-full"
+LOG_DIR="/ruilab2/hjxa/ms-swift/logs/SFT/llama-0.5B-350B-math-full"
 swanlab_name=$(basename "${OUTPUT_BASE_DIR%/}")
 DATASET="/ruilab2/hjxa/data/SFT/OpenMathInstruct-2-msswift_cached-LLaMA_0.5B/train"
 
@@ -59,17 +59,17 @@ swift sft \
   --truncation_strategy right \
   --swanlab_token WODn49OiskSyv0qBnFZcL \
   --swanlab_project $swanlab_name \
-  --save_steps 2000 \
-  --max_steps 1000 \
+  --save_steps 10000 \
+  --max_steps 10000 \
   --lr_scheduler_type cosine \
-  --warmup_steps 2000 \
+  --warmup_steps 1000 \
   --cached_dataset "$DATASET" \
   --use_hf true \
   --load_from_cache_file true \
   --split_dataset_ratio 0 \
   --tuner_type full \
   --torch_dtype bfloat16 \
-  --per_device_train_batch_size 50 \
+  --per_device_train_batch_size 64 \
   --attn_impl flash_attention_2 \
   --learning_rate 1e-5 \
   --gradient_checkpointing true \
