@@ -24,10 +24,10 @@ export MKL_NUM_THREADS=1
 # ===============================SFT数据集缓存脚本示例===============================
 swift export \
     --model /ruilab2/PT-LLaMA-0.5B-FineWeb-edu-350B/checkpoints/v8-20260511-151925/checkpoint-350000 \
-    --dataset /ruilab2/hjxa/data/SFT/OpenMathInstruct-2-msswift/openmathinstruct2_train_msswift.jsonl \
+    --dataset /ruilab2/hjxa/data/SFT/Dolci-Instruct-SFT/dolci_instruct_sft_msswift.jsonl \
     --use_hf true \
     --dataset_num_proc 48 \
     --to_cached_dataset true \
     --dataset_shuffle true \
-    --output_dir /ruilab2/hjxa/data/SFT/OpenMathInstruct-2-msswift_cached-LLaMA_0.5B/ \
+    --output_dir /ruilab2/hjxa/data/SFT/Dolci-Instruct-SFT/dolci_instruct_sft_msswift_cached-LLaMA_0.5B/ \
     --template_mode train \

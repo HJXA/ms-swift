@@ -4,10 +4,10 @@ set -e
 ############################################
 # 环境变量
 ############################################
-export MASTER_PORT=20006
+export MASTER_PORT=20004
 export PATH="/ruilab/jxhe/miniconda3/envs/swift/bin:$PATH"
 export NPROC_PER_NODE=1
-export CUDA_VISIBLE_DEVICES=6
+export CUDA_VISIBLE_DEVICES=4
 export NCCL_P2P_LEVEL=NVL
 export HF_ENDPOINT=https://hf-mirror.com
 
@@ -16,10 +16,10 @@ export HF_ENDPOINT=https://hf-mirror.com
 ############################################
 MODEL_ROOT="/ruilab2/hjxa/checkpoints/pt/llama-0.5B-350B/little_sets"
 
-OUTPUT_BASE_DIR="/ruilab2/hjxa/ms-swift/output/SFT/llama-0.5B-350B-math-full"
-LOG_DIR="/ruilab2/hjxa/ms-swift/logs/SFT/llama-0.5B-350B-math-full"
+OUTPUT_BASE_DIR="/ruilab2/hjxa/ms-swift/output/SFT/llama-0.5B-350B-general-full"
+LOG_DIR="/ruilab2/hjxa/ms-swift/logs/SFT/llama-0.5B-350B-general-full"
 swanlab_name=$(basename "${OUTPUT_BASE_DIR%/}")
-DATASET="/ruilab2/hjxa/data/SFT/OpenMathInstruct-2-msswift_cached-LLaMA_0.5B/train"
+DATASET="/ruilab2/hjxa/data/SFT/Dolci-Instruct-SFT/dolci_instruct_sft_msswift_cached-LLaMA_0.5B/train"
 
 mkdir -p "$OUTPUT_BASE_DIR"
 mkdir -p "$LOG_DIR"

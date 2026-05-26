@@ -2,7 +2,7 @@ from pathlib import Path
 from transformers import AutoTokenizer
 
 ROOTS = [
-    Path("/ruilab2/hjxa/ms-swift/output/SFT/llama-0.5B-350B-math-full"),
+    Path("/ruilab2/hjxa/ms-swift/output/SFT/llama-0.5B-350B-general-full"),
 ]
 
 chat_template = r"""{% if messages[0]['role'] == 'system' %}
