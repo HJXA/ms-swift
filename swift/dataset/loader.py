@@ -229,6 +229,13 @@ def init_self_cognition_preprocessor(
                      f"author: {kwargs['author']}.")
 
 
+def _inject_dataset_routing_tag(dataset: DATASET_TYPE, ds_name: str) -> DATASET_TYPE:
+    """Inject ``dataset`` column for multi-teacher routing (constant per source dataset)."""
+    if isinstance(dataset, HfIterableDataset):
+        return dataset.map(lambda example: {**example, 'dataset': ds_name})
+    return dataset.add_column('dataset', [ds_name] * len(dataset))
+
+
 def load_dataset(
     datasets: Union[List[str], str],
     *,
@@ -389,8 +396,13 @@ def load_dataset(
             random_state=seed,
         )
         if train_dataset is not None:
+            # Inject dataset_syntax.dataset as routing tag for multi-teacher
+            ds_name = dataset_syntax.dataset
+            train_dataset = _inject_dataset_routing_tag(train_dataset, ds_name)
             train_datasets.append(train_dataset)
         if val_dataset is not None:
+            ds_name = dataset_syntax.dataset
+            val_dataset = _inject_dataset_routing_tag(val_dataset, ds_name)
             val_datasets.append(val_dataset)
 
 

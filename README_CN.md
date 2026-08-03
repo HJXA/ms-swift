@@ -49,7 +49,7 @@
 <img src="asset/discord_qr.jpg" width="200" height="200">  |  <img src="asset/wechat.png" width="200" height="200">
 
 ## 📝 简介
-🍲 **ms-swift**是魔搭社区提供的大模型与多模态大模型微调部署框架，现已支持600+纯文本大模型与400+多模态大模型的训练（预训练、微调、人类对齐）、推理、评测、量化与部署。其中大模型包括：Qwen3、Qwen3.5、InternLM3、GLM4.5、Mistral、DeepSeek-R1、Llama4等模型，多模态大模型包括：Qwen3-VL、Qwen3-Omni、Llava、InternVL3.5、MiniCPM-V-4、Ovis2.5、GLM4.5-V、DeepSeek-VL2等模型。
+🍲 **ms-swift**是魔搭社区提供的大模型与多模态大模型微调部署框架，现已支持600+纯文本大模型与400+多模态大模型的训练（预训练、微调、人类对齐）、推理、评测、量化与部署。其中大模型包括：Qwen3、Qwen3.5、InternLM3、GLM4.5、Mistral、DeepSeek-R1、Llama4等模型，多模态大模型包括：Qwen3-VL、Qwen3-Omni、Kimi-K3、Llava、InternVL3.5、MiniCPM-V-4、Ovis2.5、GLM4.5-V、DeepSeek-VL2等模型。
 
 🍔 除此之外，ms-swift汇集了最新的训练技术，包括集成Megatron并行技术，包括TP、PP、CP、EP等为训练提供加速，以及众多GRPO算法族强化学习的算法，包括：GRPO、DAPO、GSPO、SAPO、CISPO、RLOO、Reinforce++等提升模型智能。ms-swift支持广泛的训练任务，包括DPO、KTO、RM、CPO、SimPO、ORPO等偏好学习算法，以及Embedding、Reranker、序列分类任务。ms-swift提供了大模型训练全链路的支持，包括使用vLLM、SGLang和LMDeploy对推理、评测、部署模块提供加速，以及使用GPTQ、AWQ、BNB、FP8技术对大模型进行量化。
 
@@ -73,6 +73,8 @@
 - **模型量化**：支持AWQ、GPTQ、FP8和BNB的量化导出，导出的模型支持使用vLLM/SGLang/LmDeploy推理加速。
 
 ## 🎉 新闻
+- 🎁 2026.07.22: 支持moonshotai多模态模型[Kimi-K3](https://modelscope.cn/models/moonshotai/Kimi-K3)的推理，包含XTML对话模板、思考通道（`reasoning_effort`）与工具调用（`--agent_template kimi_k3`）。
+- 🎁 2026.06.10: Megatron-Ray支持GRPO和GKD训练，查看[文档](docs/source/Instruction/Ray.md)和[示例](examples/ray)。
 - 🎁 2026.03.03: **ms-swift v4.0**大版本正式发布，release note参考[这里](https://github.com/modelscope/ms-swift/releases/tag/v4.0.0)，您的建议可以在[这个issue](https://github.com/modelscope/ms-swift/issues/7250)中反馈给我们，感谢您的支持。
 - 🎁 2025.11.14: Megatron GRPO现已支持！查看[文档](./docs/source/Megatron-SWIFT/GRPO.md)和[示例](examples/megatron/grpo)。
 - 🎁 2025.11.04: 支持[Mcore-Bridge](docs/source/Megatron-SWIFT/Mcore-Bridge.md)，使Megatron训练像transformers一样简单易用。
@@ -137,14 +139,14 @@ uv pip install -e . --torch-backend=auto
 | python       | >=3.10        | 3.12            |                    |
 | cuda         |              | cuda12.8/13.0       | 使用cpu、npu、mps则无需安装 |
 | torch        | >=2.0        | 2.8.0/2.11.0         |                    |
-| transformers | >=4.33       | 4.57.6/5.8.1        |                    |
+| transformers | >=4.33       | 4.57.6/5.12.1        |                    |
 | modelscope   | >=1.23       |                     |                    |
 | datasets     | >=3.0,<4.8.5 | 3.6.0/4.8.4         |                    |
-| peft         | >=0.11,<0.20 |                     |                    |
-| flash_attn   |              | 2.8.3/4.0.0b12 |                    |
+| peft         | >=0.11,<0.21 |                     |                    |
+| flash_attn   |              | 2.8.3/4.0.0b15 |                    |
 | trl          | >=0.15,<1.0 | 0.29.1              | RLHF               |
 | deepspeed    | >=0.14       | 0.18.9              | 训练                 |
-| vllm         | >=0.5.1      | 0.11.0/0.20.2        | 推理/部署              |
+| vllm         | >=0.5.1      | 0.11.0/0.23.0        | 推理/部署              |
 | sglang       | >=0.4.6      |          | 推理/部署              |
 | evalscope    | >=1.0       |                     | 评测                 |
 | gradio       |              | 5.32.1              | Web-UI/App         |
@@ -308,7 +310,7 @@ print(f'response: {resp_list[0].choices[0].message.content}')
 | [PPO](https://github.com/modelscope/ms-swift/blob/main/examples/train/rlhf/ppo) | ✅ | ✅            | ✅ | ✅ | ✅ | ❌                                                                                            |
 | [DPO](https://github.com/modelscope/ms-swift/blob/main/examples/train/rlhf/dpo) | ✅ | ✅            | ✅ | ✅ | ✅ | [✅](https://github.com/modelscope/ms-swift/blob/main/examples/train/multimodal/rlhf/dpo)  |
 | [KTO](https://github.com/modelscope/ms-swift/blob/main/examples/train/rlhf/kto.sh) | ✅ | ✅            | ✅ | ✅ | ✅ | [✅](https://github.com/modelscope/ms-swift/blob/main/examples/train/multimodal/rlhf/kto.sh)  |
-| [奖励模型](https://github.com/modelscope/ms-swift/blob/main/examples/train/rlhf/rm.sh) | ✅ | ✅             | ✅ | ✅ | ✅ | ✅                                                                                            |
+| [奖励模型](https://github.com/modelscope/ms-swift/blob/main/examples/train/rlhf/rm) | ✅ | ✅             | ✅ | ✅ | ✅ | ✅                                                                                            |
 | [CPO](https://github.com/modelscope/ms-swift/blob/main/examples/train/rlhf/cpo.sh) | ✅ | ✅            | ✅ | ✅ | ✅ | ✅                                                                                            |
 | [SimPO](https://github.com/modelscope/ms-swift/blob/main/examples/train/rlhf/simpo.sh) | ✅ | ✅          | ✅ | ✅| ✅ | ✅                                                                                            |
 | [ORPO](https://github.com/modelscope/ms-swift/blob/main/examples/train/rlhf/orpo.sh) | ✅ | ✅           | ✅ | ✅ | ✅ | ✅                                                                                            |

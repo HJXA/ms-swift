@@ -1,6 +1,7 @@
 # Copyright (c) ModelScope Contributors. All rights reserved.
 import math
 import numpy as np
+import sys
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -9,12 +10,14 @@ from PIL import Image, ImageOps
 from transformers.dynamic_module_utils import get_class_from_dynamic_module
 from typing import Any, Dict, List, Optional
 
-from swift.utils import get_env_args
+from swift.utils import get_env_args, get_logger
 from ..base import Template
 from ..constant import LLMTemplateType, MLLMTemplateType
 from ..register import TemplateMeta, register_template
 from ..template_inputs import StdTemplateInputs
 from ..utils import Prompt, findall
+
+logger = get_logger()
 
 
 @dataclass
@@ -186,9 +189,9 @@ class DeepseekVLTemplate(Template):
 
             return {'sequences': generated_tokens}
 
-    def decode(self, generate_ids: List[int], **kwargs) -> Any:
+    def decode_generate_ids(self, generate_ids: List[int], **kwargs) -> Any:
         if 'template_inputs' not in kwargs or not kwargs['template_inputs'].generate_mode:
-            return super().decode(generate_ids, **kwargs)
+            return super().decode_generate_ids(generate_ids, **kwargs)
         else:
             img_size = get_env_args('img_size', int, 384)
             patch_size = 16
@@ -457,6 +460,169 @@ register_template(
         template_cls=DeepseekOCR2))
 
 
+class UnlimitedOCR(DeepseekOCR):
+    image_placeholder = ['<image>']
+
+    def init_env_args(self):
+        super().init_env_args()
+        self._rswa_window = self.config.sliding_window_size
+
+    def _encode(self, inputs: StdTemplateInputs) -> Dict[str, Any]:
+        # Official infer_multi uses a single <image> for all images.
+        # Expand to N placeholders so DeepseekOCR._encode's 1:1 mapping works.
+        n_images = len(inputs.images or [])
+        if n_images > 1:
+            for msg in inputs.messages:
+                content = msg.get('content')
+                if isinstance(content, str) and content.count('<image>') == 1:
+                    msg['content'] = content.replace('<image>', '<image>' * n_images, 1)
+        return super()._encode(inputs)
+
+    # ==================== R-SWA Training Mask (only train) ====================
+    @staticmethod
+    def _build_rswa_attention_mask(labels, attention_mask_1d, window_size, dtype):
+        """Construct an R-SWA mask: Prefix fully visible + Answer sliding window. ⚠️ For training purposes only."""
+        batch_size, seq_len = labels.shape
+        device = labels.device
+        prefix_lens = []
+        for i in range(batch_size):
+            non_ignored = (labels[i] != -100).nonzero(as_tuple=True)[0]
+            prefix_lens.append(non_ignored[0].item() if len(non_ignored) > 0 else seq_len)
+
+        row = torch.arange(seq_len, device=device).view(seq_len, 1)
+        col = torch.arange(seq_len, device=device).view(1, seq_len)
+        causal = col <= row
+        can_attend = torch.zeros(batch_size, seq_len, seq_len, dtype=torch.bool, device=device)
+
+        for i in range(batch_size):
+            p = prefix_lens[i]
+            can_attend[i, :p, :] = causal[:p, :]
+            can_attend[i, p:, :p] = True
+            if p < seq_len:
+                answer_len = seq_len - p
+                a_row = torch.arange(answer_len, device=device).view(-1, 1)
+                a_col = torch.arange(answer_len, device=device).view(1, -1)
+                can_attend[i, p:, p:] = causal[p:, p:] & ((a_row - a_col) < window_size)
+
+        valid = attention_mask_1d.bool()
+        for i in range(batch_size):
+            can_attend[i, :, ~valid[i]] = False
+            can_attend[i, ~valid[i], :] = False
+
+        min_val = torch.finfo(dtype).min
+        mask = torch.where(can_attend, torch.tensor(0, dtype=dtype, device=device), min_val).to(dtype)
+        return mask.unsqueeze(1)
+
+    def data_collator(self, batch: List[Dict[str, Any]], *, padding_to: Optional[int] = None) -> Dict[str, Any]:
+        res = super().data_collator(batch, padding_to=padding_to)
+        if not self.is_training or not self._rswa_window or self._rswa_window <= 0:
+            return res
+        if 'labels' not in res or 'attention_mask' not in res:
+            return res
+
+        labels, attn_1d = res['labels'], res['attention_mask']
+        if not isinstance(labels, torch.Tensor) or not isinstance(attn_1d, torch.Tensor):
+            return res
+
+        res['attention_mask'] = self._build_rswa_attention_mask(labels, attn_1d, self._rswa_window,
+                                                                self.model_info.torch_dtype)
+        logger.info_once('[UnlimitedOCR] R-SWA windowed mask applied in data_collator')
+        return res
+
+    # ==================== Generation Control ====================
+    def generate(self, model, *args, **kwargs):
+        base_model = self.get_base_model(model)
+        config = base_model.config
+
+        _orig_sw = config.sliding_window_size
+        config._ring_window = _orig_sw
+        config.sliding_window = None
+
+        try:
+            ngram_size = get_env_args('no_repeat_ngram_size', int, 0)
+            ngram_window = get_env_args('ngram_window', int, 256)
+            if ngram_size > 0 and ngram_window > 0:
+                ProcessorCls = get_class_from_dynamic_module(
+                    'modeling_unlimitedocr.SlidingWindowNoRepeatNgramProcessor', self.model_info.model_dir)
+                if ProcessorCls is not None:
+                    existing = kwargs.get('logits_processor', []) or []
+                    kwargs['logits_processor'] = list(existing) + [ProcessorCls(ngram_size, ngram_window)]
+
+            return super().generate(model, *args, **kwargs)
+        finally:
+            config.sliding_window = _orig_sw
+
+    # ==================== Post-processing Hooks ====================
+    def decode_generate_ids(self, generate_ids: List[int], **kwargs) -> str:
+        response = super().decode_generate_ids(generate_ids, **kwargs)
+        template_inputs = kwargs.get('template_inputs')
+        is_finished = kwargs.get('is_finished', True)
+
+        if is_finished and not self.is_training and template_inputs is not None:
+            re_match = get_class_from_dynamic_module('modeling_unlimitedocr.re_match', self.model_info.model_dir)
+            if re_match is not None:
+                try:
+                    matches_ref, matches_images, matches_other = re_match(response)
+                    template_inputs._ocr_parsed_refs = {
+                        'all': matches_ref,
+                        'images': matches_images,
+                        'others': matches_other
+                    }
+                except Exception as e:
+                    logger.warning(f'[UnlimitedOCR] Official re_match failed: {e}')
+        return response
+
+    def post_process_generate_response(self, response: str, inputs: StdTemplateInputs) -> str:
+        if self.is_training:
+            return response
+
+        output_dir = (inputs.chat_template_kwargs or {}).get('ocr_output_dir', './ocr_output')
+        parsed_refs = getattr(inputs, '_ocr_parsed_refs', None)
+
+        if parsed_refs and inputs.images:
+            try:
+                import os
+                image = inputs.images[0] if isinstance(inputs.images[0], Image.Image) else None
+                if image is not None:
+                    os.makedirs(os.path.join(output_dir, 'images'), exist_ok=True)
+
+                    draw_fn = get_class_from_dynamic_module('modeling_unlimitedocr.process_image_with_refs',
+                                                            self.model_info.model_dir)
+                    if draw_fn is not None:
+                        result_img = draw_fn(image, parsed_refs['all'], output_dir)
+                        result_img.save(os.path.join(output_dir, 'result_with_boxes.jpg'))
+
+                    img_idx = 0
+                    for match in parsed_refs['images']:
+                        response = response.replace(match, f'![](images/{img_idx}.jpg)\n', 1)
+                        img_idx += 1
+                    for match in parsed_refs['others']:
+                        response = response.replace(match, '')
+                    response = response.replace('\\coloneqq', ':=').replace('\\eqqcolon', '=:')
+            except Exception as e:
+                logger.warning(f'[UnlimitedOCR] Post-process failed: {e}')
+
+        return response.strip()
+
+    def _load_dynamic_modules(self):
+        if self._BasicImageTransform is None:
+            model_dir = self.model_info.model_dir
+            self._BasicImageTransform = get_class_from_dynamic_module('modeling_unlimitedocr.BasicImageTransform',
+                                                                      model_dir)
+            self._dynamic_preprocess = get_class_from_dynamic_module('modeling_unlimitedocr.dynamic_preprocess',
+                                                                     model_dir)
+
+
+register_template(
+    TemplateMeta(
+        MLLMTemplateType.unlimited_ocr,
+        prefix=[['bos_token_id']],
+        prompt=['{{QUERY}}'],
+        chat_sep=None,
+        template_cls=UnlimitedOCR,
+    ))
+
+
 @dataclass
 class DeepseekV2_5TemplateMeta(TemplateMeta):
     prefix: Prompt = field(default_factory=lambda: ['<｜begin▁of▁sentence｜>{{SYSTEM}}'])
@@ -472,11 +638,7 @@ register_template(DeepseekV2_5TemplateMeta(LLMTemplateType.deepseek_r1, is_think
 
 class DeepseekV3_1Template(Template):
     jinja_enable_thinking_key = 'thinking'
-
-    def _is_add_non_thinking_round(self, messages, i, start_idx):
-        # Additional condition: the previous turn needs to be 'user'
-        return super()._is_add_non_thinking_round(messages, i,
-                                                  start_idx) and i > 0 and messages[i - 1]['role'] == 'user'
+    non_thinking_prefix_only_after_user = True
 
 
 register_template(
@@ -489,12 +651,48 @@ register_template(
         non_thinking_prefix='</think>',
         history_thinking_prefix='</think>'))
 
+REASONING_EFFORT_MAX = (
+    'Reasoning Effort: Absolute maximum with no shortcuts permitted.\n'
+    'You MUST be very thorough in your thinking and comprehensively decompose the problem to resolve '
+    'the root cause, rigorously stress-testing your logic against all potential paths, edge cases, '
+    'and adversarial scenarios.\n'
+    'Explicitly write out your entire deliberation process, documenting every intermediate step, '
+    'considered alternative, and rejected hypothesis to ensure absolutely no assumption is left unchecked.\n\n')
+
+
+class DeepseekV4Template(DeepseekV3_1Template):
+
+    def init_env_args(self):
+        super().init_env_args()
+        # reasoning_effort: "max", "high", or None
+        self.reasoning_effort = get_env_args('reasoning_effort', str, None)
+        if self.reasoning_effort is None:
+            self.reasoning_effort = 'high' if self.enable_thinking else None
+        self.enable_thinking = self.reasoning_effort in ('max', 'high')
+        self.chat_template_kwargs['reasoning_effort'] = self.reasoning_effort
+
+    def _get_enable_thinking(self, inputs=None):
+        reasoning_effort = None if inputs is None else inputs.chat_template_kwargs.get('reasoning_effort')
+        if reasoning_effort is not None:
+            return reasoning_effort in ('max', 'high')
+        return super()._get_enable_thinking(inputs)
+
+    def _get_system(self, inputs):
+        system = super()._get_system(inputs)
+        reasoning_effort = inputs.chat_template_kwargs.get('reasoning_effort')
+        if reasoning_effort is None:
+            reasoning_effort = self.reasoning_effort
+        if reasoning_effort == 'max' and self._get_enable_thinking(inputs):
+            system = REASONING_EFFORT_MAX + (system or '')
+        return system
+
+
 register_template(
     DeepseekV2_5TemplateMeta(
         LLMTemplateType.deepseek_v4,
         agent_template='deepseek_v4',
         is_thinking=True,
-        template_cls=DeepseekV3_1Template,
+        template_cls=DeepseekV4Template,
         thinking_prefix='<think>',
         non_thinking_prefix='</think>',
         history_thinking_prefix='</think>'))

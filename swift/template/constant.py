@@ -56,6 +56,7 @@ class LLMTemplateType:
     glm4_5 = 'glm4_5'
     glm4_7 = 'glm4_7'
     glm5_1 = 'glm5_1'
+    glm5_2 = 'glm5_2'
     codegeex4 = 'codegeex4'
     longwriter_llama = 'longwriter_llama'
 
@@ -75,6 +76,7 @@ class LLMTemplateType:
     baichuan = 'baichuan'
     baichuan_m1 = 'baichuan_m1'
     minicpm = 'minicpm'
+    minicpm5 = 'minicpm5'
     telechat = 'telechat'
     telechat2 = 'telechat2'
 
@@ -109,6 +111,7 @@ class LLMTemplateType:
     dots1 = 'dots1'
     hunyuan_moe = 'hunyuan_moe'
     hunyuan = 'hunyuan'
+    hy_v3_preview = 'hy_v3_preview'
     hy_v3 = 'hy_v3'
     ernie = 'ernie'
     ernie_thinking = 'ernie_thinking'
@@ -140,6 +143,7 @@ class MLLMTemplateType:
     qwen3_omni = 'qwen3_omni'
     qwen2_audio = 'qwen2_audio'
     qwen3_asr = 'qwen3_asr'
+    qwen3_tts = 'qwen3_tts'
     qwen3_vl = 'qwen3_vl'
     qwen3_vl_emb = 'qwen3_vl_emb'
     qwen3_vl_reranker = 'qwen3_vl_reranker'
@@ -151,6 +155,7 @@ class MLLMTemplateType:
     ovis1_6_llama3 = 'ovis1_6_llama3'
     ovis2 = 'ovis2'
     ovis2_5 = 'ovis2_5'
+    ovis_ocr2 = 'ovis_ocr2'
     mimo_vl = 'mimo_vl'
     midashenglm = 'midashenglm'
 
@@ -222,6 +227,7 @@ class MLLMTemplateType:
     deepseek_janus_pro = 'deepseek_janus_pro'
     deepseek_ocr = 'deepseek_ocr'
     deepseek_ocr2 = 'deepseek_ocr2'
+    unlimited_ocr = 'unlimited_ocr'
 
     mplug_owl2 = 'mplug_owl2'
     mplug_owl3 = 'mplug_owl3'
@@ -237,6 +243,7 @@ class MLLMTemplateType:
     step_audio2_mini = 'step_audio2_mini'
     kimi_vl = 'kimi_vl'
     kimi_k25 = 'kimi_k25'
+    kimi_k3 = 'kimi_k3'
     keye_vl = 'keye_vl'
     keye_vl_1_5 = 'keye_vl_1_5'
     dots_ocr = 'dots_ocr'
@@ -256,6 +263,7 @@ class MLLMTemplateType:
     gemma3n = 'gemma3n'
     gemma4 = 'gemma4'
     gemma4_nothinking = 'gemma4_nothinking'
+    diffusion_gemma = 'diffusion_gemma'
     mistral_2503 = 'mistral_2503'
     mistral_2506 = 'mistral_2506'
     mistral_2512 = 'mistral_2512'
@@ -264,6 +272,7 @@ class MLLMTemplateType:
     paddle_ocr_1_5 = 'paddle_ocr_1_5'
     hunyuan_ocr = 'hunyuan_ocr'
     step3_vl = 'step3_vl'
+    minimax_m3_vl = 'minimax_m3_vl'
 
 
 class TemplateType(LLMTemplateType, MLLMTemplateType, RMTemplateType):

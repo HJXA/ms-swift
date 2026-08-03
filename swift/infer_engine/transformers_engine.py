@@ -3,11 +3,14 @@ import asyncio
 import hashlib
 import inspect
 import json
+import os
 import pickle
 import time
 import torch
 import torch.nn.functional as F
+import transformers
 from copy import deepcopy
+from packaging import version
 from PIL import Image
 from queue import Queue
 from threading import Thread
@@ -21,12 +24,15 @@ from swift.metrics import Metric
 from swift.model import get_model_processor
 from swift.template import Template
 from swift.tuners import Swift
-from swift.utils import get_last_valid_indices, safe_snapshot_download, to_device
+from swift.utils import get_last_valid_indices, patch_kernels, safe_snapshot_download, to_device
 from .infer_engine import InferEngine
 from .protocol import (ChatCompletionResponse, ChatCompletionResponseChoice, ChatCompletionResponseStreamChoice,
                        ChatCompletionStreamResponse, ChatMessage, DeltaMessage, EmbeddingResponse,
                        EmbeddingResponseData, InferRequest, RequestConfig, random_uuid)
 from .utils import AdapterRequest, InferStreamer, LogitsStreamer, TokensIteratorStreamer, prepare_generation_config
+
+_TRANSFORMERS_GE_5_2 = version.parse(transformers.__version__) >= version.parse('5.2.0')
+_kernels_patched = False
 
 
 class _GenerationConfig(GenerationConfig):
@@ -49,6 +55,7 @@ class TransformersEngine(InferEngine):
             *,
             template: Optional[Template] = None,
             adapters: Optional[List[str]] = None,
+            adapter_names: Optional[List[str]] = None,
             max_batch_size: int = 1,  # 0/1: no limit
             reranker_use_activation: bool = True,
             # model kwargs
@@ -84,6 +91,12 @@ class TransformersEngine(InferEngine):
         self.use_hf = use_hf
         self.revision = revision
         self.hub_token = hub_token
+        global _kernels_patched
+        if _TRANSFORMERS_GE_5_2 and not _kernels_patched:
+            if use_hf is not None and 'USE_HF' not in os.environ:
+                os.environ['USE_HF'] = str(use_hf)
+            patch_kernels()
+            _kernels_patched = True
         if isinstance(model, str):
             self.model, processor = self._get_model_processor(model, **kwargs)
             template = self._get_template(processor, template_type=template_type)
@@ -92,8 +105,16 @@ class TransformersEngine(InferEngine):
             if template is None:
                 raise ValueError('`template` is required when `model` is a nn.Module')
         super().__init__(template)
-        for adapter in self.adapters:
-            self._add_adapter(safe_snapshot_download(adapter, use_hf=self.use_hf, hub_token=self.hub_token))
+        if isinstance(adapter_names, str):
+            adapter_names = [adapter_names]
+        if adapter_names and len(adapter_names) != len(self.adapters):
+            raise ValueError(f'The length of adapter_names ({len(adapter_names)}) must match the length of '
+                             f'adapters ({len(self.adapters)})')
+        for i, adapter in enumerate(self.adapters):
+            adapter_name = None if adapter_names is None else adapter_names[i]
+            self._add_adapter(
+                safe_snapshot_download(adapter, use_hf=self.use_hf, hub_token=self.hub_token),
+                adapter_name=adapter_name)
         self.engine = self.model  # dummy
         self.generation_config = getattr(self.model, 'generation_config', None)
         self._queue = Queue()
@@ -298,7 +319,7 @@ class TransformersEngine(InferEngine):
                 toolcall = None
                 if is_finished[i]:
                     toolcall = self._get_toolcall(
-                        self.template.decode(generate_ids, template_inputs=template_inputs[i]))
+                        self.template.decode_generate_ids(generate_ids, template_inputs=template_inputs[i]))
                 finish_reason = self._get_finish_reason(generation_config.max_new_tokens, usage_info.completion_tokens,
                                                         is_finished[i])
 
@@ -422,7 +443,7 @@ class TransformersEngine(InferEngine):
 
                 logprobs = self._get_logprobs(logprobs_list, generate_ids, request_config.top_logprobs)
                 usage_info = self._update_usage_info(usage_info, len(generate_ids))
-                response = self.template.decode(generate_ids, template_inputs=template_inputs[i])
+                response = self.template.decode_generate_ids(generate_ids, template_inputs=template_inputs[i])
                 finish_reason = self._get_finish_reason(generation_config.max_new_tokens, len(generate_ids), True)
                 toolcall = self._get_toolcall(response)
                 token_ids = generate_ids if request_config.return_details else None

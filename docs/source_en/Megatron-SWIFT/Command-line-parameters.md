@@ -4,7 +4,7 @@
 
 **Training Parameters**:
 
-- 🔥micro_batch_size: Batch size per device, default is 1.
+- 🔥micro_batch_size: Batch size per DP group, default is 1.
 - 🔥global_batch_size: Total batch size, equivalent to `micro_batch_size * data parallel size * gradient accumulation steps`. Default is 16.
   - Here, `Data Parallelism size (DP) = Total number of GPUs / (TP × PP × CP)`.
 - 🔥recompute_granularity: Granularity of activation recomputation, options are 'full', 'selective' and 'none'. 'full' means recomputing the entire transformer layer, while 'selective' means only recomputing the core attention part of the transformer layer. 'selective' is generally recommended. Default is 'selective'.
@@ -28,10 +28,11 @@
 - apply_rope_fusion: Defaults to False. Used to enable RoPE fusion. This parameter is passed through from megatron-core. Note: RoPE fusion is not supported in all cases, for example: MLA, mrope, etc. are not supported.
 - gradient_accumulation_fusion: Defaults to True. Used to enable gradient accumulation fusion.
 - 🔥cross_entropy_loss_fusion: Enables cross-entropy loss computation fusion. Defaults to True.
-- cross_entropy_fusion_impl: Implementation for cross-entropy loss fusion. Options are 'native' and 'te'. Defaults to None. Automatically set to 'te' for CUDA and 'native' for NPU.
+- cross_entropy_fusion_impl: The implementation of cross-entropy loss fusion. Options are `'native'` and `'te'`. Defaults to `'native'`.
+  - **The default value in `ms-swift>=4.3.1` has been changed from `'te'` to `'native'`**, for the reason see [this PR](https://github.com/NVIDIA/Megatron-LM/pull/5115). This may result in higher GPU memory usage.
 - calculate_per_token_loss: Scales the cross-entropy loss according to the number of non-padding tokens in the global batch. Defaults to None. When `task_type` is 'causal_lm' and during pretraining/fine-tuning, it defaults to True; otherwise, it defaults to False.
-- 🔥attention_backend: The attention backend to use (flash, fused, unfused, local, auto). Default is flash.
-  - If `flash_attention_3` is installed, specifying `--attention_backend flash` will prioritize using FA3. Refer to the training script [here](https://github.com/modelscope/ms-swift/tree/main/examples/train/flash_attention_3). To use flash_attention_3 for the ViT part of multimodal models, set `--attn_impl flash_attention_3`.
+- 🔥attention_backend: The attention backend to use (flash, fused, unfused, local, auto, flash_2, flash_3, flash_4). Defaults to `flash`.
+  - If `flash_attention_4/3` is installed, `--attention_backend flash` will prioritize fa4/fa3. To explicitly specify a version, you can set `--attention_backend flash_2/3/4`. For training script examples, refer to [here](https://github.com/modelscope/ms-swift/tree/main/examples/train/flash_attention_3). To use flash_attention_4/3 for the ViT part of multimodal models, please set `--attn_impl flash_attention_4/3`.
   - Some models may not support flash attention; you need to manually set `--attention_backend unfused/fused --padding_free false`, for example: Llama4, GPT-OSS.
 - optimizer: Optimizer type. Options include 'adam', 'sgd', 'muon', and 'dist_muon'. Default is 'adam'.
   - Note: This 'adam' is actually 'adamw'. See [here](https://github.com/NVIDIA/TransformerEngine/blob/d8f1e68f7c414f3e7985a8b41de4443b2f819af3/transformer_engine/pytorch/optimizers/fused_adam.py#L69-L70) for reference.
@@ -39,6 +40,7 @@
 - 🔥optimizer_cpu_offload: Offloads optimizer states to the CPU. For example, set: `--use_precision_aware_optimizer true --optimizer_cpu_offload true --optimizer_offload_fraction 0.7`. Defaults to `False`.
   - This parameter can significantly reduce GPU memory usage (at the cost of increased CPU memory consumption). When the `global_batch_size` is large, its impact on training speed is minimal.
 - 🔥optimizer_offload_fraction: The fraction of the optimizer state to offload to CPU. Default is `1.0`.
+- optimizer_cuda_graph: Whether to enable CUDA graph for the optimizer step, forwarded to Megatron's `--optimizer-cuda-graph`. Default is `False`. This parameter requires "megatron-core>=0.17".
 - use_precision_aware_optimizer: Use the precision-aware optimizer in TransformerEngine, which allows setting the main parameters and optimizer states to lower precision, such as fp16 and fp8.
 - main_grads_dtype: The dtype of main gradients when use_precision_aware_optimizer is enabled. Options are 'fp32' and 'bf16'. Default is 'fp32'.
 - main_params_dtype: The dtype of main parameters when use_precision_aware_optimizer is enabled. Options are 'fp32' and 'fp16'. Default is 'fp32'.
@@ -104,9 +106,11 @@
 - muon_use_nesterov: Whether to use Nesterov-style momentum in the internal SGD. Default is False.
 - muon_scale_mode: Scale mode for the Muon optimizer. Options include 'spectral', 'unit_rms_norm', and 'shape_scaling'. Default is 'spectral'.
 - muon_fp32_matmul_prec: FP32 matrix multiplication precision for Newton-Schulz iteration. Options include 'low', 'medium', and 'high'. Default is 'medium'.
+- muon_coefficient_type: Newton-Schulz coefficient type for the Muon optimizer, forwarded to Megatron's `--muon-coefficient-type`. Available options depend on the installed emerging_optimizers version (e.g. 'quintic', 'polar_express', 'simple', 'cans', 'aol', 'deepseekv4', 'cubic5', 'custom'). Default is 'quintic'.
 - muon_num_ns_steps: Number of Newton-Schulz steps for the Muon optimizer. Default is 5.
 - muon_tp_mode: NS calculation method for tensor model parallel weights. Options include 'blockwise', 'duplicated', and 'distributed'. Default is 'blockwise'.
 - muon_extra_scale_factor: Additional scale factor for Muon updates. Default is 1.
+- muon_scalar_optimizer: Optimizer for nonlinear parameters (embeddings, biases, norms) when using Muon. Options are 'adam' or 'lion'. Default is 'adam'.
 
 **Checkpoint Parameters**:
 
@@ -118,7 +122,8 @@
 - 🔥no_save_rng: Do not save RNG, default is False.
 - 🔥mcore_model: The checkpoint directory to load (mcore storage format). Defaults to None. For information about resuming training from checkpoints, please refer to the description of the `--finetune` parameter.
   - megatron-swift recommends directly loading and storing safetensors weights, refer to [mcore-bridge documentation](./Mcore-Bridge.md).
-  - Difference between `--model` and `--mcore_model`: `--model/--adapters/--ref_model/--ref_adapters` are followed by safetensors weight directories, while `--mcore_model/--mcore_adapter/--mcore_ref_model/--mcore_ref_adapter` are followed by mcore weight directories. `--model/--adapters` do not support loading checkpoint resumption states. Therefore, if you set `--no_save_optim false`, mcore weight format will be additionally stored for checkpoint resumption, and you need to use `--mcore_model/--mcore_adapter` to load the checkpoint resumption state.
+  - The difference between `--model` and `--mcore_model`: `--model/--adapters/--ref_model/--ref_adapters` accepts a directory containing safetensors weights, while `--mcore_model/--mcore_adapter/--mcore_ref_model/--mcore_ref_adapter` accepts a directory containing mcore weights.
+  - `--model/--adapters` does not support loading checkpoint resume states. Therefore, if `--no_save_optim false` is set, additional mcore-format weights will be saved for checkpoint resumption, and you need to use `--mcore_model/--mcore_adapter` to load the resumed checkpoint state. For example: `--model <hf-model> --mcore_adapter <mcore-adapter-ckpt>`. (Using `--model/--adapters` to resume training is also possible, but the optimizer state will not be restored.)
 - 🔥no_load_optim: Do not load optimizer, default is False.
   - Note: When resuming training from a checkpoint, setting `--no_load_optim false` (i.e., loading the optimizer state) typically consumes significantly more GPU memory than setting `--no_load_optim true` (i.e., skipping the optimizer state).
 - 🔥no_load_rng: Do not load RNG, default is False.
@@ -143,21 +148,29 @@ For guidance on selecting parallelization strategies, please refer to the [Train
 - ddp_backend: Distributed backend. Options are 'nccl' or 'gloo'. Defaults to nccl.
 - ddp_timeout: Defaults to 18000000, in seconds.
 - 🔥use_distributed_optimizer: Use a distributed optimizer (i.e., ZeRO-1). Default is True.
+- use_megatron_fsdp: Use Megatron-FSDP as the data-parallel implementation (in place of DDP). Default is False. When enabled, it forces `use_distributed_optimizer=True`, only supports the `sgd`/`adam` optimizers, and requires `CUDA_DEVICE_MAX_CONNECTIONS` greater than 1.
+  - Note: Try not to use Megatron-FSDP together with tensor parallelism or context parallelism, since they require conflicting `CUDA_DEVICE_MAX_CONNECTIONS` settings for best performance: sequence parallelism requires setting `CUDA_DEVICE_MAX_CONNECTIONS` to 1, while Megatron-FSDP requires not setting it to 1 (for better parallelization).
+- data_parallel_sharding_strategy: The data-parallel sharding strategy for Megatron-FSDP. Options are 'no_shard', 'optim', 'optim_grads', 'optim_grads_params'; default is 'optim_grads_params'. Only takes effect when `use_megatron_fsdp=True`.
 - 🔥tensor_model_parallel_size: TP (Tensor Parallelism) size, default is 1.
 - 🔥pipeline_model_parallel_size: PP (Pipeline Parallelism) size, default is 1.
 - 🔥decoder_first_pipeline_num_layers: The number of Transformer layers in the first pipeline stage of the decoder. Default is None, which means the Transformer layers are evenly distributed across all pipeline stages.
   - This parameter is typically used when **the total number of Transformer layers is not divisible by the pipeline parallelism (PP) size**, or when the first pipeline stage (PP stage 0) of a multimodal model consumes excessive GPU memory.
 - 🔥decoder_last_pipeline_num_layers: The number of Transformer layers in the last pipeline stage of the decoder. Default is None, which means the Transformer layers are evenly distributed across all pipeline stages.
 - overlap_p2p_comm: Overlap pipeline parallel communication with forward and backward blocks in 1F1B. Defaults to True.
+- batch_p2p_comm: Use batch_isend_irecv instead of individual isend/irecv calls. Defaults to `None`, and is set to `not args.overlap_p2p_comm`.
+  - If pipeline parallelism hangs, you can set this to False.
 - align_param_gather: When set to True, all PP stages will launch parameter all-gather operations simultaneously. Otherwise, each PP stage will launch independently as needed. Defaults to True.
 - 🔥sequence_parallel: Enables sequence parallel optimization; this option takes effect only when `tensor_model_parallel_size` is set. Default is False.
 - 🔥context_parallel_size: CP (Context Parallelism) size, default is 1.
+- cp_comm_type: The inter-GPU communication type for context parallelism. Accepted values are `"p2p"`, `"all_gather"`, `"a2a"`, or `"a2a+p2p"`. Defaults to `None`.
+- cp_partition_mode: How THD sequence rows are partitioned across context-parallel ranks.
+- sequence_packing_scheduler: Scheduler for sequence packing and dynamic context parallel. Optional values are "dp_balanced" and "default_dynamic_cp". dp_balanced: DP-balanced scheduler for sequence packing. default_dynamic_cp: Dynamic-CP scheduler for packed sequence balancing. Defaults to None.
 - tp_comm_overlap: Overlap tensor parallel communication with GEMM (General Matrix Multiplication) kernels (to reduce communication time). Default is False.
 - 🔥overlap_grad_reduce: Overlap grad reduction operations in DDP (to reduce DP communication time). Default is False.
 - 🔥overlap_param_gather: Overlap all-gather of parameters in the distributed optimizer (to reduce DP communication time). Default is False.
 - virtual_pipeline_model_parallel_size: The number of virtual pipeline stages per pipeline parallel rank. Defaults to None. VPP parallelism is used to reduce computation bubbles in PP parallelism and improve GPU utilization, but will slightly increase communication overhead.
 - microbatch_group_size_per_vp_stage: The number of consecutive microbatches processed by each virtual pipeline stage. Defaults to None, which equals `pipeline_model_parallel_size`.
-- 🔥pipeline_model_parallel_layout: A string describing a custom pipeline (pp/vpp) model parallel layout. For example: "E|(t|)*3,m|m||L". Here, E, L, t, and m denote the embedding layer, loss layer, Transformer decoder layer, and MTP layer, respectively. Stages are separated by "|". Repeated stages or layers can be expressed using multiplication. Commas are only for cosmetic readability and have no syntactic meaning. The default value is None, indicating that this argument is not used to set the layout.
+- 🔥pipeline_model_parallel_layout: A string describing a custom pipeline (pp/vpp) model parallel layout. For example: `"Et*4|(tttt|)*14tmL"`. Here, E, L, t, and m denote the embedding layer, loss layer, Transformer decoder layer, and MTP layer, respectively. Stages are separated by "|". Repeated stages or layers can be expressed using multiplication. Commas are only for cosmetic readability and have no syntactic meaning. The default value is None, indicating that this argument is not used to set the layout.
   - This parameter is typically used on heterogeneous GPU clusters.
 - 🔥expert_model_parallel_size: The degree of expert parallelism, default is 1.
 - 🔥expert_tensor_parallel_size: expert tensor-parallel size. Default is 1.
@@ -183,11 +196,16 @@ For guidance on selecting parallelization strategies, please refer to the [Train
 **FP8 Parameters**:
 - fp8_format: The FP8 format scheme used for FP8 tensors in the forward and backward pass. Options are 'e4m3' and 'hybrid'. Default is None.
 - fp8_recipe: The FP8 recipe (algorithm scheme) used for FP8 tensors in the forward and backward pass. Options are 'tensorwise', 'delayed', 'mxfp8', and 'blockwise'. Default is 'delayed'. Note that blockwise fp8 requires CUDA version 12.9 or higher.
-- fp8_amax_history_len: Number of steps for which amax history is recorded per tensor. Default is 1024.
-- fp8_amax_compute_algo: Algorithm for computing amax from history. Options are 'most_recent' and 'max'. Default is 'max'.
 - fp8_param_gather: Keep the compute parameter in FP8 (do not use any other intermediate dtype) and perform the parameter all-gather in FP8 format. Default is False.
   - Tips: Set this to True if you want to export weights in FP8 format; otherwise, set it to False.
+- fp8_amax_history_len: Number of steps for which amax history is recorded per tensor. Default is 1024.
+- fp8_amax_compute_algo: Algorithm for computing amax from history. Options are 'most_recent' and 'max'. Default is 'max'.
 
+**FP4 Parameters**:
+
+- fp4_format: The FP4 format scheme for FP4 tensors in forward and backward passes, optionally set to 'e2m1'. Defaults to None.
+- fp4_recipe: If set, enables FP4 precision through Transformer Engine. Currently only 'nvfp4' is supported, which uses the NVFP4BlockScaling recipe for Blackwell+ architecture. Default is 'nvfp4'.
+- fp4_param_gather: If set, keeps the parameters in FP4 precision to save memory. Note that not all parameters will be converted to FP4; for example, biases will remain unchanged. Default is False.
 
 **Mixed Precision Parameters**:
 
@@ -198,14 +216,13 @@ For guidance on selecting parallelization strategies, please refer to the [Train
 - accumulate_allreduce_grads_in_fp32: Perform gradient accumulation and allreduce operations in fp32 precision. If `--bf16` is enabled and `main_params_dtype` is 'fp32', this is set to True. Otherwise, it defaults to False.
 
 **MoE Parameters**:
-- moe_router_load_balancing_type: Determines the load balancing strategy for the router. Options include "aux_loss", "seq_aux_loss", "global_aux_loss", "sinkhorn", and "none". Default value is None. Read from config.json.
+- moe_router_load_balancing_type: Determines the load balancing strategy for the router. Options include "aux_loss", "seq_aux_loss", "global_aux_loss", "sinkhorn", and "none". Supports a single strategy or a list of multiple strategies (e.g. `--moe_router_load_balancing_type seq_aux_loss global_aux_loss`). Default value is None. Read from config.json.
 - 🔥moe_router_dtype: Data type used for routing computation and expert output weighted averaging. Options are 'none', 'fp32', and 'fp64', which enhances numerical stability, especially when the number of experts is large. When used together with `moe_permute_fusion`, the performance impact is negligible. Default is 'fp32'. 'none' means no change to data type.
 - moe_token_dispatcher_type: The type of token dispatcher to use. Options include 'allgather', 'alltoall', 'flex', and 'alltoall_seq'. Default is 'alltoall'.
 - moe_enable_deepep: Enable DeepEP for efficient token dispatching and combine in MoE models. Only works with flex token dispatcher by setting `--moe_token_dispatcher_type flex`.
 - 🔥moe_grouped_gemm: When each rank contains multiple experts, multiple local GEMM kernels can be launched in parallel streams to improve utilization and performance by using GroupedLinear from TransformerEngine. Default is True.
 - 🔥moe_permute_fusion: Fuses token permutation operations during token dispatch. Default is False.
-- 🔥moe_aux_loss_coeff: Defaults to 0, meaning the auxiliary loss is not used. Generally, a higher value leads to worse training performance but more balanced MoE expert utilization. Please choose an appropriate value based on experimental results.
-  - Note: For `moe_aux_loss`, when `padding_free` is set to False, versions of `megatron-core < 0.16` have an issue where routing loss is computed on padding tokens. Please refer to [this PR](https://github.com/NVIDIA/Megatron-LM/pull/2142). Additionally, please use `mcore-bridge >= 1.4.0.dev`. Please refer to [this PR](https://github.com/modelscope/mcore-bridge/pull/79).
+- 🔥moe_aux_loss_coeff: Defaults to 0, meaning the auxiliary loss is not used. Supports a single float or a list of floats corresponding to each strategy in `moe_router_load_balancing_type`. Generally, a higher value leads to worse training performance but more balanced MoE expert utilization. Please choose an appropriate value based on experimental results.
 - moe_z_loss_coeff: Scaling coefficient for z-loss. Default is None.
 - 🔥moe_shared_expert_overlap: Enables overlap between shared expert computation and the dispatcher. If not enabled, shared expert computation will be performed after routing experts. Only effective when `moe_shared_expert_intermediate_size` is set. Default is False.
 - 🔥moe_expert_capacity_factor: Capacity factor for each expert. `None` means no tokens will be dropped. Default is `None`. When `--moe_expert_capacity_factor` is set, tokens exceeding an expert’s capacity will be dropped based on their selection probability. This can **balance the training load and improve training speed** (for example, set it to 1. or 2.).
@@ -214,14 +231,19 @@ For guidance on selecting parallelization strategies, please refer to the [Train
 
 **DSA Parameters**
 
-- dsa_indexer_loss_coeff: Coefficient for the DSA indexer KL divergence loss. Set to 0 to disable indexer loss. Default is None.
+- dsa_indexer_loss_coeff: Coefficient for the DSA indexer KL divergence loss. Set to 0 to disable indexer loss. Default is `0.`.
 - dsa_indexer_use_sparse_loss: Whether to use sparse DSA indexer loss. If True, the indexer loss will be computed using the top-k indices. Default is False.
+- apply_dsa_kernel_fusion: Whether to enable fused DSA sparse-attention kernels (FlashMLA + cuDNN DSA). Set to False to fall back to unfused PyTorch implementations. Requires flash_mla and nvidia-cudnn-frontend >= 1.24.0. Default is False. (Requires the Megatron-LM dev branch)
 
+**Deepseek-V4**
+
+- csa_dense_mode: Whether to use dense mode for compressed sparse attention. If `True`, the CSA indexer will be disabled. Defaults to `False`.
+- use_fused_mhc: Use cuTile fused kernels for mHC operations. When `True`, attempts to replace the reference mHC modules with fused cuda.tile (cuTile) autograd functions for better performance on supported GPUs. Requires cuTile to be installed; if cuTile is unavailable, the flag is silently reset to `False` and a warning is emitted. Defaults to `False`.
+- mhc_recompute_layer_num: Number of layers per MHC recompute block. When set, every `mhc_recompute_layer_num` layers form a recompute block. If `None`, all layers in the transformer block share a single recompute block. Defaults to `None`.
 
 **MTP Parameters**
-- mtp_num_layers: Number of Multi-Token Prediction (MTP) layers. MTP extends the prediction scope at each position to multiple future tokens. This MTP implementation uses D sequential modules to sequentially predict D additional tokens. Default is None. (requires "megatron-core>=0.14")
-  - Note: The value of mtp_num_layers will not be automatically retrieved from config.json and must be set manually. You can refer to the `num_nextn_predict_layers`, `mtp_num_hidden_layers` field in config.json to fill in this value. When using mcore-bridge, MTP weights will be loaded from safetensors files first. If not found, random initialization will be performed. (To use blockwise fp8 + mtp, please use mcore>=0.15)
-  - Multimodal MTP support: Requires installing "mcore-bridge>=1.1.0".
+- mtp_num_layers: Number of Multi-Token Prediction (MTP) layers. MTP extends the prediction scope at each position to multiple future tokens. This MTP implementation uses D sequential modules to sequentially predict D additional tokens. Default is None.
+  - Note: The value of mtp_num_layers will not be automatically retrieved from config.json and must be set manually. You can refer to the `num_nextn_predict_layers`, `mtp_num_hidden_layers` field in config.json to fill in this value. When using mcore-bridge, MTP weights will be loaded from safetensors files first. If not found, random initialization will be performed.
 - mtp_loss_scaling_factor: Scaling factor of Multi-Token Prediction (MTP) loss. We compute the average of MTP losses across all depths, then multiply it by this scaling factor to obtain the overall MTP loss, which serves as an additional training objective. Default is 0.1.
 - mtp_decoder_input_detach: Controls whether to stop gradients through decoder_input in the MTP branch. Defaults to False. When enabled, the MTP loss will not back-propagate directly through decoder_input to the embedding/ViT, but will still update the backbone via the hidden_states pathway.
 - mtp_shared_weights: Share weights across MTP layers, following the MTP scheme proposed in GLM-5. Defaults to False. For example, you can set `--mtp_num_layers 3 --mtp_shared_weights true`.
@@ -283,7 +305,8 @@ LoRA Training:
 
 
 **Other Parameters**:
-
+- megatron_extra_kwargs: Additional arguments passed directly to Megatron (forwarded to the `ModelConfig` class in [mcore-bridge](https://github.com/modelscope/mcore-bridge/blob/78cb9be33ebad69a0d940a2bc4e198f866084b70/src/mcore_bridge/config/model_config.py#L116), which inherits from megatron-core's `TransformerConfig`). Can also be used to override parameters automatically read from `config.json`. Accepts a JSON string. Defaults to None.
+- language_model_only: Only train the language model part of the multimodal model, and only load and save the language model part. Defaults to False. (Requires "mcore-bridge>=1.4.3")
 - check_model: Check local model files for corruption or modifications and provide prompts. Defaults to True. **If in an offline environment, please set to False**.
 - rope_scaling: Parameters related to rope_scaling. Defaults to None. For format reference, see [llama3.1 config.json](https://modelscope.cn/models/LLM-Research/Meta-Llama-3.1-8B-Instruct/file/view/master?fileName=config.json&status=1), pass as a JSON string.
   - **Currently the rope_scaling module uses transformers implementation and supports all rope_scaling supported by transformers.**
@@ -294,6 +317,8 @@ LoRA Training:
 - 🔥task_type: Defaults to 'causal_lm'. Options are 'causal_lm', 'seq_cls', 'embedding', and 'generative_reranker'.
 - num_labels: This parameter needs to be specified for classification models (i.e., `--task_type seq_cls`). Represents the number of labels. Defaults to None.
 - problem_type: This parameter needs to be specified for classification models (i.e., `--task_type seq_cls`). Options are 'regression', 'single_label_classification', 'multi_label_classification'. Defaults to None. If the model is reward_model or num_labels is 1, this parameter is 'regression'; otherwise, it is 'single_label_classification'.
+- mrl_dims: Dimension configuration for [Matryoshka Representation Learning (MRL)](https://arxiv.org/abs/2205.13147) on embedding training. Default is None. Format is `Dict[int, float]` or a JSON string, where the key is the truncated embedding dimension and the value is the corresponding loss weight, e.g. `'{"32": 1.0, "64": 1.0, "128": 1.0}'`. When enabled, the trainer slices `last_hidden_state` to each dimension, applies L2 normalization, and aggregates the per-dimension `loss_type` losses with the configured weights. Only effective when `task_type='embedding'`.
+  - Note: The maximum supported embedding dimension is determined by `hidden_size` in the model's `config.json`. Any key-value pair whose key is greater than `hidden_size` will be silently ignored.
 - 🔥save_strategy: Saving strategy, options are 'steps' and 'epoch'. Defaults to 'steps'. When set to 'epoch', `save_steps` and `eval_steps` are automatically calculated to save at each epoch, so any user-provided values for these arguments are ignored.
 - callbacks: Custom trainer callbacks. Defaults to `[]`.
 
@@ -402,24 +427,31 @@ In addition to inheriting the training parameters, the following parameters are 
 - log_rollout_offpolicy_metrics: Whether to log training-inference mismatch diagnostic metrics (KL, PPL, χ², etc.) when `rollout_importance_sampling_mode` is not set. When `rollout_importance_sampling_mode` is set, metrics are always logged. Default is False.
 - off_policy_sequence_mask_delta: Off-Policy Sequence Masking threshold from [DeepSeek-V3.2 paper](https://arxiv.org/abs/2512.02556). When set, computes `mean(old_policy_logps - policy_logps)` for each sequence. If this value exceeds the threshold AND the sequence has negative advantage, the sequence is masked out from loss computation. For details, refer to the [documentation](../Instruction/GRPO/AdvancedResearch/training_inference_mismatch.md#off-policy-sequence-masking).
 - router_replay_mode: Router replay mode. Options are `disabled`,`R2`,`R3`. Default is disabled.
+- teacher_kl_coef: Coefficient for teacher KL in OPD-RL, i.e. `adv_t = base_adv + teacher_kl_coef * teacher_kl`. Default is 1.0.
 
 Built-in reward function parameters refer to the [documentation](../Instruction/Command-line-parameters.md#reward-function-parameters).
 
 ### GKD Parameters
 
-- teacher_model: Path or model ID of the teacher model. Required.
-- teacher_model_type: Teacher model type. Default is None, auto-detected.
-- teacher_model_revision: Teacher model version. Default is None.
 - beta: JSD divergence interpolation coefficient. 0.0 means Forward KL, 0.5 means symmetric JSD, 1.0 means Reverse KL. Default is 0.5.
 - lmbda: On-Policy learning probability. 0.0 means pure Off-Policy, 1.0 means pure On-Policy. Default is 0.5.
-- seq_kd: Whether to use teacher-generated responses (Sequential KD), not yet supported. Default is False.
 - temperature: Temperature for sampling and loss computation. Default is 0.9.
-- offload_teacher_model: Whether to offload teacher model to CPU to save GPU memory. Default is False.
 - sft_alpha: Mixing coefficient for SFT loss, `loss = jsd_loss + sft_alpha * sft_loss`. Takes effect when using dataset responses (Off-Policy). Default is 0.
 - max_completion_length: Maximum tokens for generation. Default is 512.
 - vllm_mode: Same as GRPO parameter, used for On-Policy generation. Colocate mode deploys vLLM within the program.
   - Note: On-Policy generation requires vLLM (`--use_vllm true --vllm_mode colocate/server`).
   - When `lmbda > 0` but vLLM is not enabled, it will automatically fall back to Off-Policy mode.
+
+### Teacher Parameters
+
+Used in GKD and GRPO.
+
+- teacher_model: Path or model ID of the teacher model. Required.
+- teacher_model_type: Teacher model type. Default is None, auto-detected.
+- teacher_model_revision: Teacher model version. Default is None.
+- teacher_model_server: Teacher model service URL. Deploy via `swift deploy` for logprobs; mutually exclusive with `teacher_model`. Single URL or multi-teacher JSON (`'[{"url":"...","tags":["..."]}, ...]'`). See [distillation docs](../Instruction/Distillation.md#multi-teacher-routing).
+- teacher_tag_key: Column name for multi-teacher routing (match sample values to teacher `tags`). Default is `"dataset"`.
+- offload_teacher_model: Whether to offload teacher model to CPU to save GPU memory. Default is False.
 
 ## Export Parameters
 

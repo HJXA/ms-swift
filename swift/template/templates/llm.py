@@ -337,7 +337,8 @@ register_template(
         agent_template='hunyuan_hermes'))
 
 
-class HyV3Template(Template):
+class HyV3PreviewTemplate(Template):
+    HYTK = ''
 
     def init_env_args(self):
         super().init_env_args()
@@ -347,7 +348,7 @@ class HyV3Template(Template):
         if self.reasoning_effort is None:
             self.reasoning_effort = 'high' if self.enable_thinking else 'no_think'
         self.enable_thinking = self.reasoning_effort != 'no_think'
-        self.chat_template_kwargs = {'reasoning_effort': self.reasoning_effort}
+        self.chat_template_kwargs['reasoning_effort'] = self.reasoning_effort
 
     def _get_enable_thinking(self, inputs=None):
         reasoning_effort = None if inputs is None else inputs.chat_template_kwargs.get('reasoning_effort')
@@ -363,28 +364,49 @@ class HyV3Template(Template):
         if inputs.tools:
             # For tool calls, append reasoning_mode after </tool_calls> in the tool instruction
             system = system.replace(
-                'you should print </tool_calls>',
-                f'you should print </tool_calls><｜reasoning_mode｜>reasoning_effort:{reasoning_effort}')
+                f'you should print </tool_calls{self.HYTK}>',
+                f'you should print </tool_calls{self.HYTK}><｜reasoning_mode{self.HYTK}｜>'
+                f'reasoning_effort:{reasoning_effort}')
         else:
             # For non-tool calls, append reasoning_mode to the system/prefix area
-            mode_str = f'<｜reasoning_mode｜>reasoning_effort:{reasoning_effort}'
+            mode_str = f'<｜reasoning_mode{self.HYTK}｜>reasoning_effort:{reasoning_effort}'
             system = (system or '') + mode_str
         return system
 
 
 register_template(
     TemplateMeta(
-        LLMTemplateType.hy_v3,
+        LLMTemplateType.hy_v3_preview,
         prefix=['<｜hy_begin▁of▁sentence｜>'],
         system_prefix=['<｜hy_begin▁of▁sentence｜>{{SYSTEM}}'],
         prompt=['<｜hy_User｜>{{QUERY}}<｜hy_Assistant｜>'],
         chat_sep=['<｜hy_eos｜>'],
         suffix=['<｜hy_eos｜>'],
-        template_cls=HyV3Template,
+        template_cls=HyV3PreviewTemplate,
         is_thinking=True,
         thinking_prefix='<think>',
         non_thinking_prefix='<think></think>',
         history_thinking_prefix='<think></think>',
+        agent_template='hy_v3_preview'))
+
+
+class HyV3Template(HyV3PreviewTemplate):
+    HYTK = ':opensource'
+
+
+register_template(
+    TemplateMeta(
+        LLMTemplateType.hy_v3,
+        prefix=['<｜hy_begin_of_sentence:opensource｜>'],
+        system_prefix=['<｜hy_begin_of_sentence:opensource｜>{{SYSTEM}}'],
+        prompt=['<｜hy_User:opensource｜>{{QUERY}}<｜hy_Assistant:opensource｜>'],
+        chat_sep=['<｜hy_eos:opensource｜>'],
+        suffix=['<｜hy_eos:opensource｜>'],
+        template_cls=HyV3Template,
+        is_thinking=True,
+        thinking_prefix='<think:opensource>',
+        non_thinking_prefix='<think:opensource></think:opensource>',
+        history_thinking_prefix='<think:opensource></think:opensource>',
         agent_template='hy_v3'))
 
 

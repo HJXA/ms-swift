@@ -5,12 +5,22 @@ import os
 from copy import deepcopy
 
 from swift.infer_engine import RequestConfig, TransformersEngine
-from swift.ray import RayHelper
+from swift.ray_utils import RayHelper
 from swift.utils import get_logger
 from .base import Sampler
 from .utils import get_messages_md5, get_reward
 
 logger = get_logger()
+
+
+def _pop_engine_torch_dtype(engine_kwargs):
+    # torch_dtype is always passed explicitly from --torch_dtype; a leftover
+    # copy in engine_kwargs (the old workaround for it being ignored) would
+    # crash engine construction with a duplicate keyword argument.
+    engine_kwargs = dict(engine_kwargs)
+    if engine_kwargs.pop('torch_dtype', None) is not None:
+        logger.warning('`torch_dtype` in engine_kwargs is ignored, please use `--torch_dtype` instead.')
+    return engine_kwargs
 
 
 @RayHelper.worker(group=['sampler', 'prm', 'orm'])
@@ -38,7 +48,11 @@ class VanillaSampler(Sampler):
         self.infer_engine = None
         if _Engine:
             self.infer_engine = _Engine(
-                self.args.model, model_type=self.args.model_type, template=self.template, **self.args.engine_kwargs)
+                self.args.model,
+                model_type=self.args.model_type,
+                template=self.template,
+                torch_dtype=self.args.torch_dtype,
+                **_pop_engine_torch_dtype(self.args.engine_kwargs))
             self.infer_engine.strict = False
 
     @RayHelper.function(group='sampler')

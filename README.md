@@ -51,7 +51,7 @@ You can contact us and communicate with us by adding our group:
 
 
 ## 📝 Introduction
-🍲 **ms-swift** is a large model and multimodal large model fine-tuning and deployment framework provided by the ModelScope community. It now supports training (pre-training, fine-tuning, human alignment), inference, evaluation, quantization, and deployment for 600+ text-only large models and 400+ multimodal large models. Large models include: Qwen3, Qwen3.5, InternLM3, GLM4.5, Mistral, DeepSeek-R1, Llama4, etc. Multimodal large models include: Qwen3-VL, Qwen3-Omni, Llava, InternVL3.5, MiniCPM-V-4, Ovis2.5, GLM4.5-V, DeepSeek-VL2, etc.
+🍲 **ms-swift** is a large model and multimodal large model fine-tuning and deployment framework provided by the ModelScope community. It now supports training (pre-training, fine-tuning, human alignment), inference, evaluation, quantization, and deployment for 600+ text-only large models and 400+ multimodal large models. Large models include: Qwen3, Qwen3.5, InternLM3, GLM4.5, Mistral, DeepSeek-R1, Llama4, etc. Multimodal large models include: Qwen3-VL, Qwen3-Omni, Kimi-K3, Llava, InternVL3.5, MiniCPM-V-4, Ovis2.5, GLM4.5-V, DeepSeek-VL2, etc.
 
 🍔 In addition, ms-swift integrates the latest training technologies, including Megatron parallelism techniques such as TP, PP, CP, EP to accelerate training, as well as numerous GRPO algorithm family reinforcement learning algorithms including: GRPO, DAPO, GSPO, SAPO, CISPO, RLOO, Reinforce++, etc. to enhance model intelligence. ms-swift supports a wide range of training tasks, including preference learning algorithms such as DPO, KTO, RM, CPO, SimPO, ORPO, as well as Embedding, Reranker, and sequence classification tasks. ms-swift provides full-pipeline support for large model training, including acceleration for inference, evaluation, and deployment modules using vLLM, SGLang, and LMDeploy, as well as model quantization using GPTQ, AWQ, BNB, and FP8 technologies.
 
@@ -59,7 +59,7 @@ You can contact us and communicate with us by adding our group:
 
 - 🍎 **Model Types**: Supports **600+ text-only large models**, **400+ multimodal large models**, and All-to-All full modality models from training to deployment full pipeline, with Day-0 support for popular models.
 - **Dataset Types**: Built-in 150+ datasets for pre-training, fine-tuning, human alignment, multimodal and various other tasks, with support for custom datasets. Users only need to prepare datasets for one-click training.
-- **Hardware Support**: Supports A10/A100/H100, RTX series, T4/V100, CPU, MPS, and domestic hardware Ascend NPU, etc.
+- **Hardware Support**: Supports A10/A100/H100, RTX series, T4/V100, AMD GPU (MI300 series, etc.), CPU, MPS, and domestic hardware Ascend NPU, etc.
 - **Lightweight Training**: Supports lightweight fine-tuning methods such as LoRA, QLoRA, DoRA, LoRA+, LLaMAPro, LongLoRA, LoRA-GA, ReFT, RS-LoRA, Adapter, LISA, etc.
 - **Quantized Training**: Supports training on BNB, AWQ, GPTQ, AQLM, HQQ, EETQ quantized models, requiring only 9GB training resources for 7B models.
 - **Memory Optimization**: GaLore, Q-Galore, UnSloth, Liger-Kernel, Flash-Attention 2/3, and **Ulysses and Ring-Attention sequence parallelism techniques** support, reducing memory consumption for long-text training.
@@ -77,6 +77,8 @@ You can contact us and communicate with us by adding our group:
 
 
 ## 🎉 News
+- 🎁 2026.07.22: Support inference for the moonshotai multimodal model [Kimi-K3](https://modelscope.cn/models/moonshotai/Kimi-K3), including the XTML chat template, thinking channel (`reasoning_effort`) and tool calling (`--agent_template kimi_k3`).
+- 🎁 2026.06.10: Megatron-Ray now supports GRPO and GKD training. See [docs](./docs/source_en/Instruction/Ray.md) and [examples](examples/ray).
 - 🎁 2026.03.03: **ms-swift v4.0** major version is officially released. For release notes, please refer to [here](https://github.com/modelscope/ms-swift/releases/tag/v4.0.0). You can provide your suggestions to us in [this issue](https://github.com/modelscope/ms-swift/issues/7250). Thank you for your support.
 - 🎁 2025.11.14: Megatron GRPO is now available!  Check out the [docs](./docs/source_en/Megatron-SWIFT/GRPO.md) and [examples](examples/megatron/grpo).
 - 🎁 2025.11.04: Support for [Mcore-Bridge](docs/source_en/Megatron-SWIFT/Mcore-Bridge.md), making Megatron training as simple and easy to use as transformers.
@@ -141,14 +143,14 @@ Running Environment:
 | python       | >=3.10        | 3.12                |                                           |
 | cuda         |              | cuda12.8/13.0    | No need to install if using CPU, NPU, MPS |
 | torch        | >=2.0        | 2.8.0/2.11.0         |                            |
-| transformers | >=4.33       | 4.57.6/5.8.1              |                          |
+| transformers | >=4.33       | 4.57.6/5.12.1              |                          |
 | modelscope   | >=1.23       |                     |                                           |
 | datasets     | >=3.0,<4.8.5 | 3.6.0/4.8.4         |                    |
-| peft         | >=0.11,<0.20 |                     |                                           |
-| flash_attn   |              | 2.8.3/4.0.0b12 |                                           |
+| peft         | >=0.11,<0.21 |                     |                                           |
+| flash_attn   |              | 2.8.3/4.0.0b15 |                                           |
 | trl          | >=0.15,<1.0 | 0.29.1              | RLHF                                      |
 | deepspeed    | >=0.14       | 0.18.9              | Training                                  |
-| vllm         | >=0.5.1      | 0.11.0/0.20.2       | Inference/Deployment                      |
+| vllm         | >=0.5.1      | 0.11.0/0.23.0       | Inference/Deployment                      |
 | sglang       | >=0.4.6      |          | Inference/Deployment                      |
 | evalscope    | >=1.0       |                     | Evaluation                                |
 | gradio       |              | 5.32.1              | Web-UI/App                                |
@@ -319,7 +321,7 @@ Supported Training Methods:
 | [PPO](https://github.com/modelscope/ms-swift/blob/main/examples/train/rlhf/ppo) | ✅                                                            | ✅    | ✅                                                            | ✅                                                            | ✅                                                            | ❌                                                            |
 | [DPO](https://github.com/modelscope/ms-swift/blob/main/examples/train/rlhf/dpo) | ✅                                                            | ✅    | ✅                                                            | ✅                                                            | ✅                                                            | [✅](https://github.com/modelscope/ms-swift/blob/main/examples/train/multimodal/rlhf/dpo) |
 | [KTO](https://github.com/modelscope/ms-swift/blob/main/examples/train/rlhf/kto.sh) | ✅                                                            | ✅    | ✅                                                            | ✅                                                            | ✅                                                            | [✅](https://github.com/modelscope/ms-swift/blob/main/examples/train/multimodal/rlhf/kto.sh) |
-| [Reward Model](https://github.com/modelscope/ms-swift/blob/main/examples/train/rlhf/rm.sh) | ✅                                                            | ✅    | ✅                                                            | ✅                                                            | ✅                                                            | ✅                                                            |
+| [Reward Model](https://github.com/modelscope/ms-swift/blob/main/examples/train/rlhf/rm) | ✅                                                            | ✅    | ✅                                                            | ✅                                                            | ✅                                                            | ✅                                                            |
 | [CPO](https://github.com/modelscope/ms-swift/blob/main/examples/train/rlhf/cpo.sh) | ✅                                                            | ✅    | ✅                                                            | ✅                                                            | ✅                                                            | ✅                                                            |
 | [SimPO](https://github.com/modelscope/ms-swift/blob/main/examples/train/rlhf/simpo.sh) | ✅                                                            | ✅    | ✅                                                            | ✅                                                            | ✅                                                            | ✅                                                            |
 | [ORPO](https://github.com/modelscope/ms-swift/blob/main/examples/train/rlhf/orpo.sh) | ✅                                                            | ✅    | ✅                                                            | ✅                                                            | ✅                                                            | ✅                                                            |

@@ -11,9 +11,9 @@ The following is an introduction to the dataset formats that `AutoPreprocessor` 
 
 The standard dataset format for ms-swift accepts keys such as: 'messages', 'rejected_response', 'label', 'images', 'videos', 'audios', 'tools', and 'objects'. Among these, 'messages' is a required key. 'rejected_response' is used for DPO and other RLHF training, 'label' is used for KTO training and classification model training. The keys 'images', 'videos', and 'audios' are used to store paths or URLs for multimodal data, 'tools' is used for Agent tasks, and 'objects' is used for grounding tasks.
 
-There are three core preprocessors in ms-swift: `MessagesPreprocessor`, `AlpacaPreprocessor`, and `ResponsePreprocessor`. `MessagesPreprocessor` is used to convert datasets in the messages and sharegpt format into the standard format. `AlpacaPreprocessor` converts datasets in the alpaca format, while `ResponsePreprocessor` converts datasets in the query/response format. `AutoPreprocessor` automatically selects the appropriate preprocessor for the task.
+There are three core preprocessors in ms-swift: `MessagesPreprocessor`, `AlpacaPreprocessor`, and `ResponsePreprocessor`. `MessagesPreprocessor` is used to convert datasets in the messages and sharegpt format into the standard format. It also automatically normalizes OpenAI `tool_calls` and Anthropic `tool_use`/`tool_result`/`image` content blocks. The provider-specific `OpenAIMessagesPreprocessor` and `AnthropicMessagesPreprocessor` classes can be used when explicit format selection is preferred. `AlpacaPreprocessor` converts datasets in the alpaca format, while `ResponsePreprocessor` converts datasets in the query/response format. `AutoPreprocessor` automatically selects the appropriate preprocessor for the task.
 
-The following four formats will all be converted into the `messages` field of the ms-swift standard format under the processing of `AutoPreprocessor`, meaning they can all be directly used with `--dataset <dataset-path>`:
+The following formats will all be converted into the `messages` field of the ms-swift standard format under the processing of `AutoPreprocessor`, meaning they can all be directly used with `--dataset <dataset-path>`:
 
 Messages format (standard format):
 ```jsonl
@@ -25,6 +25,28 @@ ShareGPT format:
 ```jsonl
 {"system": "<system>", "conversation": [{"human": "<query1>", "assistant": "<response1>"}, {"human": "<query2>", "assistant": "<response2>"}]}
 ```
+
+OpenAI tool-call format:
+```jsonl
+{"messages": [{"role": "user", "content": "How is the weather?"}, {"role": "assistant", "content": null, "tool_calls": [{"type": "function", "function": {"name": "get_weather", "arguments": "{\"city\":\"Beijing\"}"}}]}, {"role": "tool", "content": "Sunny"}]}
+```
+
+OpenAI Chat Completions multimodal tool-call format:
+```jsonl
+{"messages": [{"role": "user", "content": [{"type": "text", "text": "Compare these images."}, {"type": "image_url", "image_url": {"url": "data:image/png;base64,{base64_encoded}"}}, {"type": "image_url", "image_url": "https://example.com/input.png"}]}, {"role": "assistant", "content": [{"type": "text", "text": "I will inspect them."}], "tool_calls": [{"type": "function", "function": {"name": "inspect_images", "arguments": "{\"detail\":\"high\"}"}}]}]}
+```
+- OpenAI `image_url` blocks are converted to `<image>` placeholders and the top-level `images` field in their original order. This example uses the Chat Completions format; Responses API `input_text` and `input_image` blocks use a different schema.
+
+Anthropic tool-use format:
+```jsonl
+{"messages": [{"role": "assistant", "content": [{"type": "text", "text": "I will check."}, {"type": "tool_use", "id": "toolu_01", "name": "get_weather", "input": {"city": "Beijing"}}]}, {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_01", "content": "Sunny"}]}]}
+```
+
+Anthropic multimodal tool-use format:
+```jsonl
+{"messages": [{"role": "user", "content": [{"type": "text", "text": "What is in this image?"}, {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "{base64_encoded}"}}]}, {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_01", "name": "inspect_image", "input": {}}]}, {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_01", "content": [{"type": "image", "source": {"type": "url", "url": "https://example.com/result.png"}}, {"type": "text", "text": "A sunny beach."}]}]}]}
+```
+- Anthropic base64 and URL image sources are converted to `<image>` placeholders and the top-level `images` field in their original order.
 
 Query-Response format:
 ```jsonl
@@ -149,6 +171,23 @@ You can also organize the Agent dataset in the following format:
 # It will find the position of the last user in `messages`, and replace the subsequent content with `rejected_response` to form `rejected_messages`
 {"tools": "[{\"type\": \"function\", \"function\": {\"name\": \"realtime_aqi\", \"description\": \"Weather forecast. Get real-time air quality, including current air quality, PM2.5, and PM10 information.\", \"parameters\": {\"type\": \"object\", \"properties\": {\"city\": {\"type\": \"string\", \"description\": \"City name, e.g., Shanghai\"}}, \"required\": [\"city\"]}}}]", "messages": [{"role": "user", "content": "What is the weather like in Beijing and Shanghai today?"}, {"role": "tool_call", "content": "{\"name\": \"realtime_aqi\", \"arguments\": {\"city\": \"Beijing\"}}"}, {"role": "tool_call", "content": "{\"name\": \"realtime_aqi\", \"arguments\": {\"city\": \"Shanghai\"}}"}, {"role": "tool_response", "content": "{\"city\": \"Beijing\", \"aqi\": \"10\", \"unit\": \"celsius\"}"}, {"role": "tool_response", "content": "{\"city\": \"Shanghai\", \"aqi\": \"72\", \"unit\": \"fahrenheit\"}"}, {"role": "assistant", "content": "According to the weather forecast tool, the air quality index (AQI) in Beijing is 10, which indicates good air quality; whereas in Shanghai, the AQI is 72, indicating mild pollution."}], "rejected_response": [{"role": "assistant", "content": "I don't know."}]}
 ```
+
+How to debug:
+
+```python
+from swift import get_processor, get_template
+
+data = {"tools": "[{\"type\": \"function\", \"function\": {\"name\": \"realtime_aqi\", \"description\": \"Weather forecast. Get real-time air quality, including current air quality, PM2.5, and PM10 information.\", \"parameters\": {\"type\": \"object\", \"properties\": {\"city\": {\"type\": \"string\", \"description\": \"City name, e.g., Shanghai\"}}, \"required\": [\"city\"]}}}]", "messages": [{"role": "user", "content": "What is the weather like in Beijing and Shanghai today?"}, {"role": "tool_call", "content": "{\"name\": \"realtime_aqi\", \"arguments\": {\"city\": \"Beijing\"}}"}, {"role": "tool_call", "content": "{\"name\": \"realtime_aqi\", \"arguments\": {\"city\": \"Shanghai\"}}"}, {"role": "tool_response", "content": "{\"city\": \"Beijing\", \"aqi\": \"10\", \"unit\": \"celsius\"}"}, {"role": "tool_response", "content": "{\"city\": \"Shanghai\", \"aqi\": \"72\", \"unit\": \"fahrenheit\"}"}, {"role": "assistant", "content": "According to the weather forecast tool, the air quality index (AQI) in Beijing is 10, which indicates good air quality; whereas in Shanghai, the AQI is 72, indicating mild pollution."}], "rejected_response": [{"role": "assistant", "content": "I don't know."}]}
+
+template = get_template(get_processor('Qwen/Qwen3.5-4B'), loss_scale='last_round')
+template.set_mode('rlhf')  # For details, refer to the `template_mode` parameter description in the command-line documentation.
+inputs = template.encode(data)
+
+print(template.safe_decode(inputs['chosen_labels']))
+print(template.safe_decode(inputs['rejected_labels']))
+```
+
+
 #### KTO
 
 ```jsonl
@@ -167,14 +206,12 @@ You can also organize the Agent dataset in the following format:
 
 #### GKD
 
-If `seq_kd` is not enabled, i.e., the parameter is set to False, the dataset format is as follows (you can use a teacher model to pre-distill the data):
-
 ```jsonl
 {"messages": [{"role": "system", "content": "You are a useful and harmless assistant"}, {"role": "user", "content": "Tell me tomorrow's weather"}, {"role": "assistant", "content": "Tomorrow's weather will be sunny"}]}
 {"messages": [{"role": "system", "content": "You are a useful and harmless math calculator"}, {"role": "user", "content": "What is 1 + 1?"}, {"role": "assistant", "content": "It equals 2"}, {"role": "user", "content": "What about adding 1?"}, {"role": "assistant", "content": "It equals 3"}]}
 ```
 
-If `seq_kd` is enabled, the final round of the 'assistant' part is not required (the teacher model generates data during training):
+When under on-policy training, the final round of the 'assistant' part is not required (the student model generates data during training, the response from dataset will be removed):
 
 ```jsonl
 {"messages": [{"role": "system", "content": "You are a useful and harmless assistant"}, {"role": "user", "content": "Tell me tomorrow's weather"}]}
